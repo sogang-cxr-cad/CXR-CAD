@@ -134,10 +134,27 @@ def dicom_to_pil(dicom_path: str):
     return image
 
 
-def is_dicom(file_path: str) -> bool:
+def is_dicom(file_path) -> bool:
     """
     파일이 DICOM 형식인지 확인합니다 (확장자 또는 매직 바이트 기준).
+
+    Args:
+        file_path: 파일 경로 (str 또는 Path) 또는 BytesIO 객체.
     """
+    import io as _io
+
+    # BytesIO 객체인 경우: 매직 바이트만 검사
+    if isinstance(file_path, _io.IOBase):
+        try:
+            current_pos = file_path.tell()
+            file_path.seek(128)
+            result = file_path.read(4) == b"DICM"
+            file_path.seek(current_pos)  # 읽기 위치 복원
+            return result
+        except Exception:
+            return False
+
+    # 문자열/Path 경로인 경우
     path = Path(file_path)
     if path.suffix.lower() in (".dcm", ".dicom"):
         return True

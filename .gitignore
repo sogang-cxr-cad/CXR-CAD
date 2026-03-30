@@ -7,7 +7,6 @@ __pycache__/
 *.so
 
 # Distribution / packaging
-.Python
 build/
 develop-eggs/
 dist/
@@ -30,10 +29,6 @@ MANIFEST
 *.manifest
 *.spec
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -53,14 +48,6 @@ pytestdebuglog.txt
 *.mo
 *.pot
 
-# Django / Flask
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-instance/
-.webassets-cache
-
 # Environments
 .env
 .venv
@@ -77,3 +64,24 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
+
+# Django / Flask
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+instance/
+.webassets-cache
+
+# ── CXR-CAD: 모델 가중치 (절대 커밋 금지) ────────────────────────────────────
+# Colab에서 학습한 .pth / .pt 파일은 Git에 포함하지 않습니다.
+checkpoints/*.pth
+checkpoints/*.pt
+
+# 데이터셋 (대용량)
+data/
+*.csv
+
+# Jupyter Notebook 체크포인트
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/

@@ -1,0 +1,41 @@
+# CXR-CAD 프로젝트 설정 파일
+#
+# 학습(Colab)과 평가 파이프라인에서 공통으로 참조하는 하이퍼파라미터.
+# configs/config.yaml을 수정하면 노트북·스크립트 코드 변경 없이 실험 재현 가능.
+
+# ── 데이터 ────────────────────────────────────────────────────────────────────
+data:
+  image_dir: "data/images"            # NIH ChestX-ray14 이미지 루트
+  metadata_csv: "data/Data_Entry_2017.csv"
+  image_size: 224                     # 모델 입력 크기 (px)
+  val_ratio: 0.10
+  test_ratio: 0.20
+  seed: 42
+
+# ── 전처리 ────────────────────────────────────────────────────────────────────
+preprocess:
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: [8, 8]
+  imagenet_mean: [0.485, 0.456, 0.406]
+  imagenet_std:  [0.229, 0.224, 0.225]
+
+# ── 학습 ─────────────────────────────────────────────────────────────────────
+train:
+  batch_size: 32
+  num_workers: 4
+  epochs: 50
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  focal_gamma: 2.0
+  early_stopping_patience: 7
+  checkpoint_dir: "checkpoints"       # .pth 저장 위치 (gitignore됨)
+
+# ── 모델 ─────────────────────────────────────────────────────────────────────
+model:
+  default: "densenet"                 # densenet | efficientnet | vit
+  num_classes: 14
+
+# ── 추론 (API) ────────────────────────────────────────────────────────────────
+inference:
+  detection_threshold: 0.3
+  device: "auto"                      # "auto" → CUDA if available, else CPU

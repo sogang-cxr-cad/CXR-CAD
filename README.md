@@ -11,15 +11,17 @@
 ┌─────────────────┐     HTTP/JSON      ┌──────────────────────┐
 │    Streamlit     │ ◄────────────────► │     FastAPI           │
 │    Dashboard     │   localhost:8000   │     Backend           │
-│    (port 8501)   │                    │  /health /models      │
-│                  │  ?model=densenet   │  /predict             │
-│  [Model Select]  │      efficientnet  └──────────┬───────────┘
-│  DenseNet-121    │      vit                       │
-│  EfficientNet-B4 │                    ┌──────────▼───────────┐
-│  ViT-B/16        │                    │  DenseNet-121         │
-└─────────────────┘                    │  EfficientNet-B4      │
-                                        │  ViT-B/16             │
-                                        │  (PyTorch + CUDA)     │
+│    (port 8501)   │                    │  GET  /health         │
+│                  │  ?model=densenet   │  GET  /models         │
+│  [Model Select]  │      efficientnet  │  POST /predict        │
+│  DenseNet-121    │      vit           └──────────┬───────────┘
+│  EfficientNet-B4 │                               │ .pth 자동 탐색
+│  ViT-B/16        │                    ┌──────────▼───────────┐
+└─────────────────┘                    │  checkpoints/         │
+                                        │  densenet_best.pth    │
+                                        │  efficientnet_best.pth│
+                                        │  vit_best.pth         │
+                                        │  (없으면 Placeholder) │
                                         └──────────────────────┘
 ```
 
@@ -27,35 +29,62 @@
 
 ```text
 CXR-CAD/
-├── Dockerfile                      # CUDA 12.1 + PyTorch 2.2.0 GPU 환경
-├── docker-compose.yml              # API + Dashboard 멀티 컨테이너
-├── requirements.txt                # 전체 의존성
+├── Dockerfile                          # CUDA 12.1 + PyTorch 2.2.0 GPU 환경
+├── docker-compose.yml                  # API + Dashboard 멀티 컨테이너
+├── requirements.txt                    # 전체 의존성
+│
+├── configs/
+│   └── config.yaml                     # 학습 하이퍼파라미터 (모델·데이터·학습 설정)
 │
 ├── src/
 │   ├── preprocess/
-│   │   ├── data_loader.py          # NIH CSV 파싱, Patient-ID Split, 누수 검증, pos_weight
-│   │   ├── transforms.py           # cv2 CLAHE, 학습/추론/TTA 파이프라인
-│   │   └── dicom_utils.py          # pydicom 메타데이터 파싱, DICOM→PIL 변환
+│   │   ├── data_loader.py              # NIH CSV 파싱, Patient-ID Split, pos_weight 계산
+│   │   ├── dataset.py                  # PyTorch Dataset 클래스 (NIH ChestX-ray14)
+│   │   ├── split.py                    # GroupKFold 기반 Patient-level 데이터 분할
+│   │   ├── transforms.py               # CLAHE, 학습/추론/TTA 변환 파이프라인
+│   │   └── dicom_utils.py              # pydicom 메타데이터 파싱, DICOM→PIL 변환
+│   │
 │   ├── train/
-│   │   ├── models.py               # DenseNet-121 / EfficientNet-B4 / ViT-B/16 + Ensemble + TTA
-│   │   ├── losses.py               # Focal Loss (gamma=0,1,2), pos_weight
-│   │   └── train.py                # 5-Fold GroupKFold, EarlyStopping, Cosine Annealing
+│   │   ├── models.py                   # DenseNet-121 / EfficientNet-B4 / ViT-B/16 정의
+│   │   ├── focal_loss.py               # Focal Loss (gamma=0,1,2) + pos_weight
+│   │   ├── ensemble.py                 # Soft Voting Ensemble (3개 모델)
+│   │   └── trainer.py                  # 5-Fold GroupKFold, EarlyStopping, Cosine Annealing
+│   │
 │   └── analysis/
-│       ├── evaluate.py             # AUROC/AUPRC, Youden's J, ECE, Temperature Scaling, Subgroup/Domain Shift
-│       ├── gradcam.py              # Grad-CAM (3개 모델 공용), 폐 영역 이탈 감지
-│       └── error_analysis.py       # FP/FN 분석, Shortcut Learning 판정
+│       ├── evaluation.py               # AUROC/AUPRC, F1, Confusion Matrix
+│       ├── calibration.py              # ECE, Temperature Scaling
+│       ├── gradcam.py                  # Grad-CAM (3개 모델 공용), 폐 영역 이탈 감지
+│       ├── subgroup.py                 # 성별·연령대별 Subgroup 분석
+│       └── external_val.py             # CheXpert 도메인 시프트 검증
 │
 ├── api/
-│   ├── main.py                     # /health, /models, /predict?model=...
-│   └── schemas.py                  # Pydantic 스키마 (모델 선택 필드 포함)
+│   ├── main.py                         # /health, /models, /predict (DICOM 지원)
+│   └── schemas.py                      # Pydantic 스키마 (요청·응답 모델)
 │
 ├── dashboard/
-│   └── app.py                      # Streamlit Dashboard (모델 선택 UI)
+│   └── app.py                          # Streamlit Dashboard (모델 선택 UI)
+│
+├── notebooks/
+│   ├── 01_EDA.ipynb                    # 데이터 탐색 및 클래스 분포
+│   ├── 02_CLAHE_Analysis.ipynb         # 전처리 효과 시각화
+│   ├── 03_Focal_Loss_Experiment.ipynb  # gamma 파라미터 실험
+│   ├── 04_Training.ipynb               # Colab 학습 실행 노트북
+│   ├── 05_Operating_Point.ipynb        # Youden's J 임계값 최적화
+│   ├── 06_Calibration.ipynb            # Temperature Scaling, ECE 측정
+│   ├── 07_Subgroup_Analysis.ipynb      # 성별·연령 공정성 평가
+│   ├── 08_External_Validation.ipynb    # CheXpert 외부 검증
+│   └── 09_Error_Analysis.ipynb         # FP/FN, Shortcut Learning 분석
+│
+├── checkpoints/                        # ⚠️ .gitignore 처리 — .pth 파일 저장 위치
+│   ├── densenet_best.pth               # (학습 후 배치)
+│   ├── efficientnet_best.pth           # (학습 후 배치)
+│   └── vit_best.pth                    # (학습 후 배치)
 │
 └── tests/
-    ├── test_losses.py              # Focal Loss 유닛 테스트 (5개)
-    ├── test_models.py              # 모델 forward pass 테스트 (6개)
-    └── test_api.py                 # API 엔드포인트 테스트 (10개)
+    ├── conftest.py                     # pytest fixtures
+    ├── test_api.py                     # API 엔드포인트 통합 테스트
+    ├── test_encoding.py                # 이미지 인코딩/디코딩 테스트
+    └── test_transforms.py              # 전처리 변환 파이프라인 테스트
 ```
 
 ## 🚀 Quick Start
@@ -94,21 +123,43 @@ docker-compose up --build
 pytest tests/ -v
 ```
 
-### 6. 모델 학습 (NIH 데이터셋 준비 후)
+### 6. 모델 학습 (Colab 권장)
+
+`notebooks/04_Training.ipynb`를 Google Colab에서 실행하거나, 아래 CLI를 사용합니다:
 
 ```bash
-# gamma=2, DenseNet-121, 5-Fold GroupKFold
-python -m src.train.train --data_root /path/to/nih --model densenet --gamma 2
+# configs/config.yaml 설정 후 실행
+# DenseNet-121 (gamma=2, 5-Fold GroupKFold)
+python -m src.train.trainer --config configs/config.yaml --model densenet
 
 # EfficientNet-B4
-python -m src.train.train --data_root /path/to/nih --model efficientnet --gamma 2
+python -m src.train.trainer --config configs/config.yaml --model efficientnet
 
 # ViT-B/16
-python -m src.train.train --data_root /path/to/nih --model vit --gamma 1
+python -m src.train.trainer --config configs/config.yaml --model vit
 ```
 
-> ⚠️ **Placeholder 모드**: 체크포인트가 없으면 시뮬레이션 예측을 반환합니다.  
-> 학습 완료 후 `checkpoints/` 폴더에 `.pt` 파일이 생성되면 자동으로 실제 추론으로 전환됩니다.
+학습이 완료되면 `checkpoints/<model_key>_best.pth` 형식으로 저장됩니다.
+
+> ⚠️ **Placeholder 모드**: `checkpoints/`에 `.pth` 파일이 없으면 시뮬레이션 예측값을 반환합니다.  
+> 체크포인트가 배치되면 서버 재시작 없이 자동으로 실제 추론으로 전환됩니다.
+
+---
+
+## 🧠 체크포인트 저장 포맷
+
+Colab 학습 코드와 호환되는 표준 포맷:
+
+```python
+torch.save({
+    "epoch"               : epoch,
+    "model_state_dict"    : model.state_dict(),
+    "optimizer_state_dict": optimizer.state_dict(),
+    "val_auroc"           : best_auroc,
+}, "checkpoints/<model_key>_best.pth")
+```
+
+API 서버는 `model_state_dict`, `state_dict`, 직접 state_dict 세 가지 포맷을 모두 지원합니다.
 
 ---
 
@@ -119,6 +170,7 @@ python -m src.train.train --data_root /path/to/nih --model vit --gamma 1
 | **DenseNet-121** | ~8M | Dense connectivity, 가볍고 빠름 |
 | **EfficientNet-B4** | ~19M | Compound scaling, 정확도/효율 균형 |
 | **ViT-B/16** | ~86M | Self-Attention 기반 전역 문맥 학습 |
+| **Soft Voting Ensemble** | — | 3개 모델 확률 평균 |
 
 API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.  
 대시보드에서는 사이드바 라디오 버튼으로 선택 가능.
@@ -128,7 +180,7 @@ API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.
 ## 🔬 탐지 질환 (14 Classes)
 
 | # | Disease | # | Disease |
-|---|---------|---|---------| 
+|---|---------|---|---------|
 | 1 | Atelectasis | 8 | Pneumothorax |
 | 2 | Cardiomegaly | 9 | Consolidation |
 | 3 | Effusion | 10 | Edema |
@@ -188,3 +240,4 @@ API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.
 | **인프라** | Docker · CUDA 12.1 |
 | **데이터셋** | NIH ChestX-ray14 (112,120 images, 14 classes) |
 | **테스트** | pytest |
+| **설정** | YAML (configs/config.yaml) |
