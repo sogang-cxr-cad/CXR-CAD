@@ -347,7 +347,7 @@ else:
     with col_left:
         st.markdown('<div class="section-title">📷 업로드된 이미지</div>', unsafe_allow_html=True)
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.image(image, use_container_width=True, caption=uploaded_file.name)
+        st.image(image, width="stretch", caption=uploaded_file.name)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">🎯 Grad-CAM 시각화</div>', unsafe_allow_html=True)
@@ -419,4 +419,4 @@ else:
                 st.markdown('<div class="section-title">📈 전체 질환 확률</div>', unsafe_allow_html=True)
                 probs = {label: result[label] for label in DISEASE_LABELS}
                 fig = create_disease_chart(probs, threshold)
-                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
