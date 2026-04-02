@@ -129,7 +129,7 @@ st.markdown("""
 
     .section-title { font-size:1.05rem; font-weight:600; color:#1e293b; margin-bottom:0.75rem; padding-bottom:0.5rem; border-bottom:2px solid #e2e8f0; }
 
-    #MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
+    #MainMenu {visibility:hidden;} footer {visibility:hidden;}
 </style>
 """, unsafe_allow_html=True)
 
