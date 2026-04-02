@@ -5,6 +5,30 @@
 
 ---
 
+## 💡 0. 필수 숙지 원칙: `config.yaml`과 노트북 실험의 관계
+- **초기 설정 및 기본 뼈대**: 데이터셋 경로(`kaggle.nih_dir`), 에포크 수, 시드(Seed) 등 공통 환경 변수는 `configs/config.yaml`에 고정하여 모든 노트북이 베이스라인으로 공유합니다.
+- **탐색적 실험 (노트북 활용)**: 반면 `02_CLAHE`, `03_Focal_Loss`, `05_Operating_Point` 등의 튜닝 노트북에서는 반복문 등을 통해 여러 하이퍼파라미터(`clip_limit`, `gamma`, `threshold`)를 직접 대입해 보며 자유롭게 실험을 수행합니다.
+- **최종 결과 반영 (업데이트)**: 노트북 실험을 통해 **최적값을 분석해 내면, 그 결과(예: 최적 gamma=2)를 다시 공유 파일인 `config.yaml`에 업데이트**합니다. 이후 진행될 전장 학습(`04_Training`)과 서빙 엔진은 오직 `config.yaml`에 기록된 최종 확정값만을 사용합니다.
+
+**📌 노트북에서의 `config.yaml` 사용 예시 (초기 세팅)**  
+모든 캐글 노트북 파일의 첫 번째 필수 코드 셀에는 아래처럼 YAML 파일을 읽어와 변수에 할당하는 초기 세팅 코드가 있어야 합니다.
+```python
+import yaml
+
+# config.yaml 불러오기
+with open("configs/config.yaml", "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f)
+
+# 하드코딩 대신 공통 변수 가져오기 (Single Source of Truth)
+NIH_DIR = config['kaggle']['nih_dir']
+BATCH_SIZE = config['train']['batch_size']
+FOCAL_GAMMA = config['train']['focal_gamma']
+
+print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}")
+```
+
+---
+
 ## 1. 📊 Data 팀
 **목표:** 딥러닝 학습에 필요한 안정적인 전처리 파이프라인 및 데이터셋 환경 구축.
 

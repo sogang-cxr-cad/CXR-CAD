@@ -123,19 +123,23 @@ docker-compose up --build
 pytest tests/ -v
 ```
 
-### 6. 모델 학습 (Colab 권장)
+### 6. 모델 파이프라인 및 학습 (Kaggle 권장)
 
-`notebooks/04_Training.ipynb`를 Google Colab에서 실행하거나, 아래 CLI를 사용합니다:
+본 프로젝트는 **Kaggle** 플랫폼을 통해 모델 학습 및 심층 분석을 수행하는 것을 권장합니다. 상세한 환경 구축은 [`KAGGLE_SETUP.md`](KAGGLE_SETUP.md)를, 팀별 작업 흐름은 [`TEAM_WORKFLOW.md`](TEAM_WORKFLOW.md)를 참고하세요.
+
+- **데이터 준비 및 튜닝**: `01_EDA.ipynb` ~ `03_Focal_Loss_Experiment.ipynb`
+- **본 학습**: `04_Training.ipynb` (5-Fold 학습, `.pth` 저장)
+- **심층 검증**: `05_Operating_Point.ipynb` ~ `09_Error_Analysis.ipynb` (지표 보정 및 오답 원인 규명)
+
+*(로컬 GPU 서버를 갖춘 경우 아래 CLI로 학습 스크립트를 직접 실행할 수도 있습니다.)*
 
 ```bash
-# configs/config.yaml 설정 후 실행
+# configs/config.yaml 사전 설정 후 실행 
 # DenseNet-121 (gamma=2, 5-Fold GroupKFold)
 python -m src.train.trainer --config configs/config.yaml --model densenet
 
-# EfficientNet-B4
+# 그 외 모델 
 python -m src.train.trainer --config configs/config.yaml --model efficientnet
-
-# ViT-B/16
 python -m src.train.trainer --config configs/config.yaml --model vit
 ```
 
@@ -148,7 +152,7 @@ python -m src.train.trainer --config configs/config.yaml --model vit
 
 ## 🧠 체크포인트 저장 포맷
 
-Colab 학습 코드와 호환되는 표준 포맷:
+Kaggle 노트북 학습 코드와 호환되는 표준 포맷:
 
 ```python
 torch.save({
