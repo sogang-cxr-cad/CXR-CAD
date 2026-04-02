@@ -150,7 +150,7 @@ python -m src.train.trainer --config configs/config.yaml --model vit
 
 ---
 
-## 🧠 체크포인트 저장 포맷
+## 체크포인트 저장 포맷
 
 Kaggle 노트북 학습 코드와 호환되는 표준 포맷:
 
@@ -167,7 +167,7 @@ API 서버는 `model_state_dict`, `state_dict`, 직접 state_dict 세 가지 포
 
 ---
 
-## 🧠 지원 모델
+## 지원 모델
 
 | 모델 | 파라미터 | 특징 |
 |------|---------|------|
@@ -181,7 +181,7 @@ API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.
 
 ---
 
-## 🔬 탐지 질환 (14 Classes)
+## 탐지 질환 (14 Classes)
 
 | # | Disease | # | Disease |
 |---|---------|---|---------|
