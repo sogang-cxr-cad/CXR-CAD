@@ -54,7 +54,7 @@ CXR-CAD/
 │       ├── evaluation.py               # AUROC/AUPRC, F1, Confusion Matrix
 │       ├── calibration.py              # ECE, Temperature Scaling
 │       ├── gradcam.py                  # Grad-CAM (3개 모델 공용), 폐 영역 이탈 감지
-│       ├── subgroup.py                 # 성별·연령대별 Subgroup 분석
+│       ├── subgroup.py                 # 성별·연령대·촬영구도(View Position PA/AP)별 Subgroup 분석
 │       └── external_val.py             # CheXpert 도메인 시프트 검증
 │
 ├── api/
@@ -71,7 +71,7 @@ CXR-CAD/
 │   ├── 04_Training.ipynb               # Colab 학습 실행 노트북
 │   ├── 05_Operating_Point.ipynb        # Youden's J 임계값 최적화
 │   ├── 06_Calibration.ipynb            # Temperature Scaling, ECE 측정
-│   ├── 07_Subgroup_Analysis.ipynb      # 성별·연령 공정성 평가
+│   ├── 07_Subgroup_Analysis.ipynb      # 성별·연령대·촬영구도(View Position PA/AP) 공정성 평가
 │   ├── 08_External_Validation.ipynb    # CheXpert 외부 검증
 │   └── 09_Error_Analysis.ipynb         # FP/FN, Shortcut Learning 분석
 │
@@ -193,14 +193,15 @@ API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.
 
 ## 📊 평가 지표 (학습 완료 후 채워질 항목)
 
-### 5-Fold GroupKFold AUROC (Mean ± Std)
+### 5-Fold GroupKFold AUROC / AUPRC (Mean ± Std)
 
-| 모델 | AUROC | gamma |
-|------|-------|-------|
-| DenseNet-121 | TBD | 2 |
-| EfficientNet-B4 | TBD | 2 |
-| ViT-B/16 | TBD | 1 |
-| **Soft Voting Ensemble** | **TBD** | — |
+
+| 모델 | AUROC | AUPRC | gamma |
+|------|-------|-------|-------|
+| DenseNet-121 | TBD | TBD | 2 |
+| EfficientNet-B4 | TBD | TBD | 2 |
+| ViT-B/16 | TBD | TBD | 1 |
+| **Soft Voting Ensemble** | **TBD** | **TBD** | — |
 
 ### Calibration (ECE)
 
@@ -215,6 +216,17 @@ API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.
 | 모델 | NIH AUROC | CheXpert AUROC | Δ (Domain Shift) |
 |------|-----------|----------------|------------------|
 | DenseNet-121 | TBD | TBD | TBD |
+
+### Operating Point Analysis (Cardiomegaly 예시)
+
+> 스크리닝 vs 확진 목적에 따라 임계값(Threshold)을 달리 선택해야 합니다.  
+> 학습 완료 후 `notebooks/05_Operating_Point.ipynb`에서 산출한 값으로 채워질 예정입니다.
+
+| 기준 | Threshold | Sensitivity | Specificity | 용도 |
+|------|-----------|-------------|-------------|------|
+| Youden's J | TBD | TBD | TBD | 밸런스 |
+| Sens@Spec90 | TBD | TBD | 0.900 | 확진 보조 |
+| Spec@Sens90 | TBD | 0.900 | TBD | 스크리닝 |
 
 ---
 

@@ -1,8 +1,13 @@
 """
 Subgroup Analysis 유틸리티.
 
-성별 (M/F), 연령 그룹별 AUROC 성능 분석.
+성별(M/F), 연령대, 촬영구도(View Position: PA/AP)별 AUROC 성능 분석.
 데이터 편향 및 공정성 문제 탐지에 활용.
+
+사용 예시:
+    - group_col="Patient Gender"        → 성별 분석
+    - group_col="Age Group"              → 연령대 분석
+    - group_col="View Position"          → PA / AP 촬영구도 분석
 """
 
 from __future__ import annotations
@@ -28,7 +33,10 @@ def subgroup_auroc(
     Args:
         df       : 메타데이터 DataFrame (인덱스 정렬 필요)
         y_prob   : (N, C) 예측 확률
-        group_col: 그룹 컬럼명 (예: "Patient Gender", "Age Group")
+        group_col: 그룹 컬럼명
+                   예) "Patient Gender" (M/F)
+                       "Age Group"      (0-20, 20-40, ...)
+                       "View Position"  (PA, AP)
         labels   : 평가 레이블 리스트
 
     Returns:
