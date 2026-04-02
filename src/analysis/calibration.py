@@ -3,6 +3,7 @@
 
 - 신뢰도 곡선 (Reliability Diagram)
 - Expected Calibration Error (ECE)
+- Maximum Calibration Error (MCE)
 - Temperature Scaling
 """
 
@@ -52,6 +53,64 @@ def compute_ece(
         ece += (mask.sum() / n_total) * abs(acc - conf)
 
     return float(ece)
+
+
+def compute_mce(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    n_bins: int = 10,
+) -> float:
+    """
+    Maximum Calibration Error (MCE) 계산.
+
+    모든 구간 중 정확도와 신뢰도의 가장 큰 차이를 반환합니다.
+    보고서 표 예시: MCE Before Scaling=0.1234, After=0.0678
+
+    Args:
+        y_true: (N, C) or (N,) binary labels
+        y_prob: (N, C) or (N,) predicted probabilities
+        n_bins: 구간 수
+
+    Returns:
+        MCE 스칼라 값
+    """
+    y_true = y_true.flatten()
+    y_prob = y_prob.flatten()
+
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    mce  = 0.0
+
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        mask = (y_prob >= lo) & (y_prob < hi)
+        if mask.sum() == 0:
+            continue
+        acc  = y_true[mask].mean()
+        conf = y_prob[mask].mean()
+        mce  = max(mce, abs(acc - conf))
+
+    return float(mce)
+
+
+def compute_calibration_metrics(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    n_bins: int = 10,
+) -> dict:
+    """
+    ECE 및 MCE를 한 번에 계산하는 헬퍼 함수.
+
+    README Calibration 표 재현:
+        | Metric | Before Scaling | After Temp Scaling |
+        | ECE    |     0.0823     |       0.0456       |
+        | MCE    |     0.1234     |       0.0678       |
+
+    Returns:
+        {"ece": float, "mce": float}
+    """
+    return {
+        "ece": compute_ece(y_true, y_prob, n_bins),
+        "mce": compute_mce(y_true, y_prob, n_bins),
+    }
 
 
 class TemperatureScaling(nn.Module):

@@ -218,14 +218,16 @@ with st.sidebar:
     health = check_api_health()
     if health:
         loaded = health.get("loaded_models", [])
+        model_ver = health.get("model_version", "")
+        ver_tag   = f" · {model_ver}" if model_ver else ""
         if loaded:
             st.markdown(
-                f'<span class="status-connected">● API Connected ({len(loaded)}개 모델 로드됨)</span>',
+                f'<span class="status-connected">● API Connected ({len(loaded)}개 모델 로드됨{ver_tag})</span>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                '<span class="status-placeholder">● API Connected (Placeholder 모드)</span>',
+                f'<span class="status-placeholder">● API Connected (Placeholder 모드{ver_tag})</span>',
                 unsafe_allow_html=True,
             )
     else:
@@ -290,6 +292,9 @@ with st.sidebar:
         key="threshold_slider",
     )
 
+    st.divider()
+    st.page_link("pages/analysis_results.py", label="상세 분석 결과 보기", icon="📈")
+    
     st.divider()
     st.markdown(
         "<div style='text-align:center;opacity:0.45;font-size:0.72rem;'>"
@@ -381,7 +386,8 @@ else:
 
                 # ── Top Disease 카드 ──────────────────────────────────────────
                 top_disease = result["Top_Disease"].replace("_", " ")
-                top_prob    = result[result["Top_Disease"]]
+                top_prob    = result.get("Top_Probability",
+                              result.get(result["Top_Disease"], 0.0))  # 하위 호환
                 st.markdown(f"""
                 <div class="top-disease-card">
                     <div class="sub">PRIMARY FINDING</div>

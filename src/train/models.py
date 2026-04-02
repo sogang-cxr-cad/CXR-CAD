@@ -1,13 +1,19 @@
 """
-CXR-CAD 모델 아키텍처 정의 (뼈대).
+CXR-CAD 모델 아키텍처 정의.
 
-실제 가중치는 Google Colab에서 학습 후 .pth 파일로 저장합니다.
+실제 가중치는 Kaggle/Colab에서 학습 후 .pth 파일로 저장합니다.
 가중치 로드는 api/main.py (서버 시작 시)에서 수행합니다.
 
+⚠️  Forward 출력 규약 (중요):
+  - 학습 시 : logits 반환 (sigmoid 없음) → FocalLoss/BCEWithLogitsLoss 와 올바르게 연동
+  - 추론 시 : torch.sigmoid(model(x)) 로 확률 변환
+  - API     : api/main.py 의 _real_predict() 에서 sigmoid 적용
+  - Ensemble: SoftVotingEnsemble 이 sigmoid 내적 적용 후 평균
+
 지원 아키텍처:
-  - DenseNet121CAD  : DenseNet-121  (Input: 3×224×224 → Output: 14)
-  - EfficientNetCAD : EfficientNet-B4 (Input: 3×224×224 → Output: 14)
-  - ViTCAD          : ViT-B/16      (Input: 3×224×224 → Output: 14)
+  - DenseNet121CAD  : DenseNet-121  (Input: 3×224×224 → Output: 14 logits)
+  - EfficientNetCAD : EfficientNet-B4 (Input: 3×224×224 → Output: 14 logits)
+  - ViTCAD          : ViT-B/16      (Input: 3×224×224 → Output: 14 logits)
 """
 
 from __future__ import annotations
@@ -46,9 +52,9 @@ class DenseNet121CAD(nn.Module):
     DenseNet-121 기반 Multi-label 흉부 X-ray 분류 모델.
 
     - Backbone: DenseNet-121 (ImageNet pretrained)
-    - Head    : Dropout(0.5) → Linear(1024 → 14) → Sigmoid
+    - Head    : Dropout(0.5) → Linear(1024 → 14)
     - Input   : (B, 3, 224, 224)
-    - Output  : (B, 14) ∈ [0, 1]
+    - Output  : (B, 14) logits  ← 추론 시 torch.sigmoid() 적용
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, pretrained: bool = False):
@@ -67,7 +73,7 @@ class DenseNet121CAD(nn.Module):
         feat = torch.relu(self.features(x), inplace=True)
         feat = self.avgpool(feat)
         feat = torch.flatten(feat, 1)
-        return torch.sigmoid(self.classifier(feat))
+        return self.classifier(feat)  # logits — sigmoid는 추론 시 별도 적용
 
 
 # ── EfficientNet-B4 ───────────────────────────────────────────────────────────
@@ -77,9 +83,9 @@ class EfficientNetCAD(nn.Module):
     EfficientNet-B4 기반 Multi-label 흉부 X-ray 분류 모델.
 
     - Backbone: EfficientNet-B4 (ImageNet pretrained)
-    - Head    : Dropout(0.4) → Linear(1792 → 14) → Sigmoid
+    - Head    : Dropout(0.4) → Linear(1792 → 14)
     - Input   : (B, 3, 224, 224)
-    - Output  : (B, 14) ∈ [0, 1]
+    - Output  : (B, 14) logits  ← 추론 시 torch.sigmoid() 적용
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, pretrained: bool = False):
@@ -98,7 +104,7 @@ class EfficientNetCAD(nn.Module):
         x = self.features(x)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        return torch.sigmoid(self.classifier(x))
+        return self.classifier(x)  # logits — sigmoid는 추론 시 별도 적용
 
 
 # ── Vision Transformer (ViT-B/16) ─────────────────────────────────────────────
@@ -109,7 +115,7 @@ class ViTCAD(nn.Module):
 
     timm 설치 시 timm.create_model 사용, 없으면 torchvision fallback.
     - Input : (B, 3, 224, 224)
-    - Output: (B, 14) ∈ [0, 1]
+    - Output: (B, 14) logits  ← 추론 시 torch.sigmoid() 적용
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, pretrained: bool = False):
@@ -136,7 +142,7 @@ class ViTCAD(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.classifier(self.backbone(x)))
+        return self.classifier(self.backbone(x))  # logits — sigmoid는 추론 시 별도 적용
 
 
 # ── 팩토리 함수 ───────────────────────────────────────────────────────────────

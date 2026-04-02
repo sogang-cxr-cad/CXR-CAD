@@ -39,14 +39,15 @@ class PredictionResult(BaseModel):
     Hernia:            float = Field(..., ge=0.0, le=1.0)
 
     # ── 요약 ────────────────────────────────────────────────────────────────
-    Detected_Diseases: List[str] = Field(..., description="임계값 이상 질환 목록")
-    Top_Disease:       str       = Field(..., description="가장 높은 확률의 질환")
-    GradCAM_Base64:    str       = Field(..., description="Grad-CAM 히트맵 (Base64 PNG)")
-    Inference_Time_ms: int       = Field(..., ge=0, description="추론 시간 (ms)")
+    Detected_Diseases: List[str]  = Field(..., description="임계값 이상 질환 목록")
+    Top_Disease:       str        = Field(..., description="가장 높은 확률의 질환")
+    Top_Probability:   float      = Field(..., ge=0.0, le=1.0, description="Top1 질환의 예측 확률")
+    GradCAM_Base64:    str        = Field(..., description="Grad-CAM 히트맵 (Base64 PNG)")
+    Inference_Time_ms: int        = Field(..., ge=0, description="추론 시간 (ms)")
 
     # ── 모델 정보 ────────────────────────────────────────────────────────────
-    Model_Used:        str       = Field(..., description="사용된 모델 이름 (예: DenseNet-121)")
-    Model_Key:         str       = Field(..., description="모델 키 (densenet / efficientnet / vit)")
+    Model_Used:        str        = Field(..., description="사용된 모델 이름 (예: DenseNet-121)")
+    Model_Key:         str        = Field(..., description="모델 키 (densenet / efficientnet / vit)")
 
     model_config = {
         "json_schema_extra": {
@@ -58,6 +59,7 @@ class PredictionResult(BaseModel):
                 "Pleural_Thickening": 0.11, "Hernia": 0.02,
                 "Detected_Diseases": ["Cardiomegaly", "Effusion", "Edema"],
                 "Top_Disease": "Cardiomegaly",
+                "Top_Probability": 0.85,
                 "GradCAM_Base64": "iVBORw0KGgoAAAANSUhEUg...",
                 "Inference_Time_ms": 312,
                 "Model_Used": "DenseNet-121",
@@ -69,10 +71,11 @@ class PredictionResult(BaseModel):
 
 class HealthResponse(BaseModel):
     """GET /health 응답 스키마."""
-    status:        str  = Field(..., description="서비스 상태 (healthy / degraded)")
-    model_loaded:  bool = Field(..., description="모델 로드 여부")
+    status:        str       = Field(..., description="서비스 상태 (healthy / degraded)")
+    model_loaded:  bool      = Field(..., description="모델 로드 여부")
+    model_version: str       = Field(..., description="API 버전 (예: v1.0.0-ensemble)")
     loaded_models: List[str] = Field(default_factory=list, description="로드된 모델 키 목록")
-    version:       str  = Field(..., description="API 버전")
+    version:       str       = Field(..., description="API 버전")
 
 
 class ModelInfoResponse(BaseModel):

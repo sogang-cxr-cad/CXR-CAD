@@ -42,10 +42,11 @@ class SoftVotingEnsemble(nn.Module):
             self.weights = [1.0 / len(models_list)] * len(models_list)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """각 모델의 logits → sigmoid 확률 → 가중 평균."""
         out = torch.zeros(x.size(0), NUM_CLASSES, device=x.device, dtype=x.dtype)
         for model, w in zip(self.models, self.weights):
-            out += w * model(x)
-        return out
+            out += w * torch.sigmoid(model(x))  # logits → 확률 후 평균
+        return out  # (B, 14) 확률 값
 
 
 class TTAWrapper(nn.Module):

@@ -218,7 +218,8 @@ def _real_predict(model_key: str, image: Image.Image) -> Dict[str, float]:
     model  = _model_registry[model_key]
     tensor = preprocess_single_image(image).to(DEVICE)
     with torch.no_grad():
-        probs = model(tensor).squeeze(0).cpu().tolist()
+        logits = model(tensor).squeeze(0)
+        probs  = torch.sigmoid(logits).cpu().tolist()   # logits → 확률
     return {d: round(float(p), 4) for d, p in zip(DISEASE_LABELS, probs)}
 
 
@@ -231,6 +232,7 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         model_loaded=len(loaded) > 0,
+        model_version=f"v{API_VERSION}-{('ensemble' if len(loaded) > 1 else loaded[0]) if loaded else 'placeholder'}",
         loaded_models=loaded,
         version=API_VERSION,
     )
@@ -327,6 +329,7 @@ async def predict(
         **probs,
         Detected_Diseases  = detected,
         Top_Disease        = top_disease,
+        Top_Probability    = round(probs[top_disease], 4),
         GradCAM_Base64     = _FAKE_GRADCAM_B64,
         Inference_Time_ms  = inference_ms,
         Model_Used         = model_name,

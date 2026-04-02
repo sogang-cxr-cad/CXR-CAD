@@ -74,6 +74,7 @@ class Trainer:
             "model_state_dict" : model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "val_auroc"        : best_auroc,
+            "val_auprc"        : best_auprc,   # README 5-Fold 표 AUPRC 열 해당
         }, "checkpoints/<model_key>_best.pth")
     """
 
