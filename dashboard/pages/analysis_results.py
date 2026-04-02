@@ -1,23 +1,27 @@
 """
 📊 분석 결과 — CXR-CAD Analysis Dashboard.
 
-학습 완료 후 checkpoints/ 폴더에 저장된 결과 파일들(.csv, .npy)을
-자동으로 로드하여 시각화합니다.
-
-결과 파일이 없을 경우 README에 기재된 예시 데이터로 시각화합니다.
+라디오 버튼으로 지표별 화면을 전환하고,
+각 화면 하단에 LangChain 기반 LLM 해석 / 질의응답 영역을 제공합니다.
 """
 
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from pathlib import Path
+from typing import Callable
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 import streamlit as st
+
+from dashboard.services.llm_analysis import (
+    ask_metric_question,
+    generate_metric_summary,
+    langchain_is_ready,
+)
 
 
 # ── 페이지 설정 ───────────────────────────────────────────────────────────────
@@ -29,7 +33,8 @@ st.set_page_config(
 )
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
@@ -83,7 +88,13 @@ st.markdown("""
         font-size: 0.9rem;
         color: #78350f;
     }
-
+    .llm-box {
+        background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+        border: 1px solid #c7d2fe;
+        border-radius: 16px;
+        padding: 1.2rem 1.3rem;
+        margin-top: 0.6rem;
+    }
     .main-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
         border-radius: 16px;
@@ -96,195 +107,142 @@ st.markdown("""
 
     #MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
 CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
+DEFAULT_LLM_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
-DISEASE_LABELS = [
-    "Atelectasis", "Cardiomegaly", "Effusion", "Infiltration",
-    "Mass", "Nodule", "Pneumonia", "Pneumothorax",
-    "Consolidation", "Edema", "Emphysema", "Fibrosis",
-    "Pleural_Thickening", "Hernia",
-]
 
 # ── 예시 데이터 (README 기반) ──────────────────────────────────────────────────
+EXAMPLE_OP = pd.DataFrame(
+    {
+        "기준": ["Youden's J", "Sensitivity 90%", "Specificity 90%"],
+        "Threshold": [0.42, 0.28, 0.56],
+        "Sensitivity": [0.823, 0.900, 0.689],
+        "Specificity": [0.845, 0.712, 0.900],
+        "PPV": [0.134, 0.081, 0.165],
+        "NPV": [0.992, 0.996, 0.988],
+    }
+)
 
-EXAMPLE_CLASS_DIST = pd.DataFrame({
-    "Disease":    ["Infiltration","Effusion","Atelectasis","Nodule","Pneumothorax",
-                   "Mass","Consolidation","Pleural_Thick.","Cardiomegaly","Emphysema",
-                   "Edema","Fibrosis","Pneumonia","Hernia","No Finding"],
-    "Count":      [19894,13317,11559,6331,5302,5782,4667,3385,2776,2516,2303,1686,1431,227,60361],
-    "Prevalence": ["17.7%","11.9%","10.3%","5.6%","4.7%","5.1%","4.2%","3.0%","2.5%","2.2%","2.1%","1.5%","1.2%","0.2%","53.8%"],
-    "pos_weight": [4.65,7.42,8.71,16.86,20.28,18.61,22.83,32.33,39.01,44.46,46.63,65.57,82.31,492.42,0],
-})
+EXAMPLE_GENDER = pd.DataFrame(
+    {
+        "Disease": ["Cardiomegaly", "Effusion", "Hernia", "Mean"],
+        "Male AUROC": [0.9123, 0.8634, 0.9012, 0.8245],
+        "Female AUROC": [0.8834, 0.8823, 0.9234, 0.8287],
+        "Gap": ["+2.9%", "-1.9%", "-2.2%", "-0.4%"],
+    }
+)
 
-EXAMPLE_FOCAL = pd.DataFrame({
-    "gamma":    [0, 1, 2, 3],
-    "AUROC":    [0.782, 0.801, 0.812, 0.805],
-    "AUPRC":    [0.312, 0.338, 0.356, 0.349],
-})
+EXAMPLE_AGE = pd.DataFrame(
+    {
+        "Age Group": ["0-40", "40-60", "60+"],
+        "N": [23456, 48234, 40430],
+        "Mean AUROC": [0.8123, 0.8312, 0.8089],
+    }
+)
 
-EXAMPLE_CV = pd.DataFrame({
-    "Fold":    ["Fold 1","Fold 2","Fold 3","Fold 4","Fold 5"],
-    "Val AUROC": [0.8134, 0.8056, 0.8201, 0.8089, 0.8145],
-    "Val AUPRC": [0.3523, 0.3412, 0.3634, 0.3489, 0.3567],
-})
+EXAMPLE_VIEW = pd.DataFrame(
+    {
+        "View": ["PA", "AP"],
+        "N": [67234, 44886],
+        "Mean AUROC": [0.8345, 0.7823],
+        "Gap vs PA": ["—", "-5.2%"],
+    }
+)
 
-EXAMPLE_ENSEMBLE = pd.DataFrame({
-    "Model":     ["DenseNet-121","EfficientNet-B4","Ensemble"],
-    "AUROC":     [0.8125, 0.8198, 0.8312],
-    "AUPRC":     [0.3525, 0.3612, 0.3756],
-})
+EXAMPLE_EXT = pd.DataFrame(
+    {
+        "Disease": ["Cardiomegaly", "Effusion", "Pneumonia", "Atelectasis", "Mean"],
+        "NIH AUROC": [0.9012, 0.8745, 0.7534, 0.7934, 0.8306],
+        "CheXpert AUROC": [0.8534, 0.8234, 0.6823, 0.7423, 0.7754],
+        "Gap": ["-4.8%", "-5.1%", "-7.1%", "-5.1%", "-5.5%"],
+    }
+)
 
-EXAMPLE_OP = pd.DataFrame({
-    "기준":        ["Youden's J","Sensitivity 90%","Specificity 90%"],
-    "Threshold":   [0.42, 0.28, 0.56],
-    "Sensitivity": [0.823, 0.900, 0.689],
-    "Specificity": [0.845, 0.712, 0.900],
-    "PPV":         [0.134, 0.081, 0.165],
-    "NPV":         [0.992, 0.996, 0.988],
-})
+FALSE_POSITIVE_DF = pd.DataFrame(
+    {
+        "Case": ["FP-1", "FP-2", "FP-3", "FP-4", "FP-5"],
+        "예측": ["Pneumothorax", "Cardiomegaly", "Effusion", "Nodule", "Mass"],
+        "GT": ["Normal"] * 5,
+        "확률": [0.78, 0.65, 0.72, 0.58, 0.61],
+        "Grad-CAM": [
+            "우측 쇄골 아래 강조",
+            "심장 전체 강조",
+            "좌측 하단 강조",
+            "우측 상단 점",
+            "좌측 중간 강조",
+        ],
+        "원인": [
+            "쇄골 경계→기흉 오인",
+            "비만 정상 큰 심장",
+            "유방 그림자→흉수 오인",
+            "혈관 단면→결절 오인",
+            "촬영 아티팩트",
+        ],
+    }
+)
 
-EXAMPLE_CAL = pd.DataFrame({
-    "Metric":         ["ECE", "MCE"],
-    "Before Scaling": [0.0823, 0.1234],
-    "After Temp":     [0.0456, 0.0678],
-})
+FALSE_NEGATIVE_DF = pd.DataFrame(
+    {
+        "Case": ["FN-1", "FN-2", "FN-3", "FN-4", "FN-5"],
+        "예측": ["Normal"] * 5,
+        "GT": ["Nodule", "Pneumonia", "Effusion", "Atelectasis", "Hernia"],
+        "확률": [0.12, 0.23, 0.18, 0.21, 0.08],
+        "Grad-CAM": [
+            "심장 영역 집중",
+            "분산된 활성화",
+            "폐 상부 집중",
+            "좌측 폐 무시",
+            "폐 영역만 집중",
+        ],
+        "원인": [
+            "작은 결절(5mm) 미탐지",
+            "미만성 병변 인식 실패",
+            "소량 흉수 미탐지",
+            "우측 폐에만 집중",
+            "횡격막 영역 무시",
+        ],
+    }
+)
 
-EXAMPLE_GENDER = pd.DataFrame({
-    "Disease":       ["Cardiomegaly","Effusion","Hernia","Mean"],
-    "Male AUROC":    [0.9123, 0.8634, 0.9012, 0.8245],
-    "Female AUROC":  [0.8834, 0.8823, 0.9234, 0.8287],
-    "Gap":           ["+2.9%", "-1.9%", "-2.2%", "-0.4%"],
-})
-
-EXAMPLE_AGE = pd.DataFrame({
-    "Age Group": ["0-40", "40-60", "60+"],
-    "N":         [23456, 48234, 40430],
-    "Mean AUROC":[0.8123, 0.8312, 0.8089],
-})
-
-EXAMPLE_VIEW = pd.DataFrame({
-    "View":       ["PA", "AP"],
-    "N":          [67234, 44886],
-    "Mean AUROC": [0.8345, 0.7823],
-    "Gap vs PA":  ["—", "-5.2%"],
-})
-
-EXAMPLE_EXT = pd.DataFrame({
-    "Disease":         ["Cardiomegaly","Effusion","Pneumonia","Atelectasis","Mean"],
-    "NIH AUROC":       [0.9012, 0.8745, 0.7534, 0.7934, 0.8306],
-    "CheXpert AUROC":  [0.8534, 0.8234, 0.6823, 0.7423, 0.7754],
-    "Gap":             ["-4.8%","-5.1%","-7.1%","-5.1%","-5.5%"],
-})
+REGION_DF = pd.DataFrame(
+    {
+        "영역": ["폐 영역 내", "뼈(쇄골/늑골)", "의료기기", "텍스트/마커", "배경"],
+        "Count": [72, 12, 8, 5, 3],
+    }
+)
 
 
 # ── 차트 헬퍼 ─────────────────────────────────────────────────────────────────
-
-PALETTE = ["#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e",
-           "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#14b8a6",
-           "#06b6d4", "#0ea5e9", "#64748b", "#a855f7"]
-
-
-def chart_class_distribution(df: pd.DataFrame) -> go.Figure:
-    d = df[df["Disease"] != "No Finding"].sort_values("Count", ascending=True)
-    fig = go.Figure(go.Bar(
-        y=d["Disease"], x=d["Count"], orientation="h",
-        marker=dict(color=PALETTE[:len(d)], cornerradius=6),
-        text=[f"{c:,}" for c in d["Count"]], textposition="outside",
-        textfont=dict(size=11, family="Inter"),
-    ))
-    fig.update_layout(
-        height=420, margin=dict(l=0, r=60, t=30, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title="Count"),
-        yaxis=dict(tickfont=dict(size=12, family="Inter", color="#334155")),
-        title=dict(text="14-Class Distribution", font=dict(size=14, family="Inter")),
-    )
-    return fig
-
-
-def chart_focal_gamma(df: pd.DataFrame) -> go.Figure:
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(
-        x=df["gamma"].astype(str), y=df["AUROC"], name="AUROC",
-        marker=dict(color=["#94a3b8","#94a3b8","#3b82f6","#94a3b8"], cornerradius=6),
-        text=[f"{v:.3f}" for v in df["AUROC"]], textposition="outside",
-    ), secondary_y=False)
-    fig.add_trace(go.Scatter(
-        x=df["gamma"].astype(str), y=df["AUPRC"], name="AUPRC",
-        mode="lines+markers+text", line=dict(color="#f59e0b", width=2),
-        marker=dict(size=8), text=[f"{v:.3f}" for v in df["AUPRC"]], textposition="top center",
-    ), secondary_y=True)
-    fig.update_layout(
-        height=350, margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        xaxis=dict(title="gamma (γ)"), barmode="group",
-        title=dict(text="Focal Loss γ Experiment", font=dict(size=14, family="Inter")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
-    )
-    fig.update_yaxes(title_text="AUROC", range=[0.75, 0.85], secondary_y=False)
-    fig.update_yaxes(title_text="AUPRC", range=[0.28, 0.40], secondary_y=True)
-    return fig
-
-
-def chart_cv_folds(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=df["Fold"], y=df["Val AUROC"], name="AUROC",
-        marker=dict(color="#3b82f6", cornerradius=6),
-        text=[f"{v:.4f}" for v in df["Val AUROC"]], textposition="outside",
-    ))
-    fig.add_trace(go.Bar(
-        x=df["Fold"], y=df["Val AUPRC"], name="AUPRC",
-        marker=dict(color="#f59e0b", cornerradius=6),
-        text=[f"{v:.4f}" for v in df["Val AUPRC"]], textposition="outside",
-    ))
-    mean_auroc = df["Val AUROC"].mean()
-    fig.add_hline(y=mean_auroc, line_dash="dash", line_color="#dc2626",
-                  annotation_text=f"Mean AUROC: {mean_auroc:.4f}")
-    fig.update_layout(
-        height=350, barmode="group",
-        margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        title=dict(text="5-Fold GroupKFold Results", font=dict(size=14, family="Inter")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
-        yaxis=dict(range=[0.0, 0.90]),
-    )
-    return fig
-
-
-def chart_ensemble(df: pd.DataFrame) -> go.Figure:
-    colors = ["#3b82f6", "#8b5cf6", "#10b981"]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=df["Model"], y=df["AUROC"], name="AUROC",
-        marker=dict(color=colors, cornerradius=6),
-        text=[f"{v:.4f}" for v in df["AUROC"]], textposition="outside",
-    ))
-    fig.update_layout(
-        height=350, margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        title=dict(text="Single vs Ensemble AUROC", font=dict(size=14, family="Inter")),
-        yaxis=dict(range=[0.78, 0.86]),
-    )
-    return fig
-
-
 def chart_operating_point(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    for col, color in [("Sensitivity","#3b82f6"),("Specificity","#10b981"),("PPV","#f59e0b"),("NPV","#8b5cf6")]:
-        fig.add_trace(go.Bar(
-            x=df["기준"], y=df[col], name=col,
-            marker=dict(color=color, cornerradius=4),
-            text=[f"{v:.3f}" for v in df[col]], textposition="outside",
-        ))
+    for col, color in [
+        ("Sensitivity", "#3b82f6"),
+        ("Specificity", "#10b981"),
+        ("PPV", "#f59e0b"),
+        ("NPV", "#8b5cf6"),
+    ]:
+        fig.add_trace(
+            go.Bar(
+                x=df["기준"],
+                y=df[col],
+                name=col,
+                marker=dict(color=color, cornerradius=4),
+                text=[f"{v:.3f}" for v in df[col]],
+                textposition="outside",
+            )
+        )
     fig.update_layout(
-        height=380, barmode="group",
+        height=380,
+        barmode="group",
         margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="Operating Point Analysis (Cardiomegaly)", font=dict(size=14, family="Inter")),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
         yaxis=dict(range=[0, 1.12]),
@@ -292,40 +250,22 @@ def chart_operating_point(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def chart_calibration(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=df["Metric"], y=df["Before Scaling"], name="Before Scaling",
-        marker=dict(color="#ef4444", cornerradius=6),
-        text=[f"{v:.4f}" for v in df["Before Scaling"]], textposition="outside",
-    ))
-    fig.add_trace(go.Bar(
-        x=df["Metric"], y=df["After Temp"], name="After Temp Scaling",
-        marker=dict(color="#10b981", cornerradius=6),
-        text=[f"{v:.4f}" for v in df["After Temp"]], textposition="outside",
-    ))
-    fig.update_layout(
-        height=340, barmode="group",
-        margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        title=dict(text="Calibration: ECE & MCE", font=dict(size=14, family="Inter")),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
-        yaxis=dict(range=[0, 0.18]),
-    )
-    return fig
-
 
 def chart_subgroup_gender(df: pd.DataFrame) -> go.Figure:
     d = df[df["Disease"] != "Mean"]
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=d["Disease"], y=d["Male AUROC"], name="Male",
-        marker=dict(color="#3b82f6", cornerradius=6)))
-    fig.add_trace(go.Bar(x=d["Disease"], y=d["Female AUROC"], name="Female",
-        marker=dict(color="#ec4899", cornerradius=6)))
+    fig.add_trace(
+        go.Bar(x=d["Disease"], y=d["Male AUROC"], name="Male", marker=dict(color="#3b82f6", cornerradius=6))
+    )
+    fig.add_trace(
+        go.Bar(x=d["Disease"], y=d["Female AUROC"], name="Female", marker=dict(color="#ec4899", cornerradius=6))
+    )
     fig.update_layout(
-        height=340, barmode="group",
+        height=340,
+        barmode="group",
         margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="Subgroup: Gender AUROC", font=dict(size=14, family="Inter")),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
         yaxis=dict(range=[0.85, 0.95]),
@@ -333,50 +273,73 @@ def chart_subgroup_gender(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+
 def chart_subgroup_age(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure(go.Bar(
-        x=df["Age Group"], y=df["Mean AUROC"],
-        marker=dict(color=["#f59e0b","#10b981","#6366f1"], cornerradius=6),
-        text=[f"{v:.4f}" for v in df["Mean AUROC"]], textposition="outside",
-    ))
+    fig = go.Figure(
+        go.Bar(
+            x=df["Age Group"],
+            y=df["Mean AUROC"],
+            marker=dict(color=["#f59e0b", "#10b981", "#6366f1"], cornerradius=6),
+            text=[f"{v:.4f}" for v in df["Mean AUROC"]],
+            textposition="outside",
+        )
+    )
     fig.update_layout(
-        height=340, margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        height=340,
+        margin=dict(l=20, r=20, t=40, b=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="Subgroup: Age Group AUROC", font=dict(size=14, family="Inter")),
         yaxis=dict(range=[0.78, 0.86]),
     )
     return fig
 
 
+
 def chart_subgroup_view(df: pd.DataFrame) -> go.Figure:
-    fig = go.Figure(go.Bar(
-        x=df["View"], y=df["Mean AUROC"],
-        marker=dict(color=["#3b82f6","#ef4444"], cornerradius=6),
-        text=[f"{v:.4f}" for v in df["Mean AUROC"]], textposition="outside",
-        width=0.4,
-    ))
-    fig.add_hline(y=0.8, line_dash="dot", line_color="#94a3b8",
-                  annotation_text="Baseline 0.80")
+    fig = go.Figure(
+        go.Bar(
+            x=df["View"],
+            y=df["Mean AUROC"],
+            marker=dict(color=["#3b82f6", "#ef4444"], cornerradius=6),
+            text=[f"{v:.4f}" for v in df["Mean AUROC"]],
+            textposition="outside",
+            width=0.4,
+        )
+    )
+    fig.add_hline(y=0.8, line_dash="dot", line_color="#94a3b8", annotation_text="Baseline 0.80")
     fig.update_layout(
-        height=340, margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        height=340,
+        margin=dict(l=20, r=20, t=40, b=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="Subgroup: View Position (PA vs AP)", font=dict(size=14, family="Inter")),
         yaxis=dict(range=[0.74, 0.87]),
     )
     return fig
 
 
+
 def chart_external_val(df: pd.DataFrame) -> go.Figure:
     d = df[df["Disease"] != "Mean"]
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=d["Disease"], y=d["NIH AUROC"], name="NIH (Internal)",
-        marker=dict(color="#3b82f6", cornerradius=6)))
-    fig.add_trace(go.Bar(x=d["Disease"], y=d["CheXpert AUROC"], name="CheXpert (External)",
-        marker=dict(color="#f97316", cornerradius=6)))
+    fig.add_trace(
+        go.Bar(x=d["Disease"], y=d["NIH AUROC"], name="NIH (Internal)", marker=dict(color="#3b82f6", cornerradius=6))
+    )
+    fig.add_trace(
+        go.Bar(
+            x=d["Disease"],
+            y=d["CheXpert AUROC"],
+            name="CheXpert (External)",
+            marker=dict(color="#f97316", cornerradius=6),
+        )
+    )
     fig.update_layout(
-        height=380, barmode="group",
+        height=380,
+        barmode="group",
         margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="External Validation: NIH vs CheXpert", font=dict(size=14, family="Inter")),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center"),
         yaxis=dict(range=[0.6, 1.0]),
@@ -384,231 +347,473 @@ def chart_external_val(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+
 def chart_domain_gap(df: pd.DataFrame) -> go.Figure:
     d = df.copy()
-    d["gap_numeric"] = d.apply(lambda r:
-        r["CheXpert AUROC"] - r["NIH AUROC"], axis=1)
+    d["gap_numeric"] = d["CheXpert AUROC"] - d["NIH AUROC"]
     colors = ["#ef4444" if g < 0 else "#10b981" for g in d["gap_numeric"]]
-    fig = go.Figure(go.Bar(
-        x=d["Disease"], y=d["gap_numeric"],
-        marker=dict(color=colors, cornerradius=4),
-        text=[f"{v:+.1%}" for v in d["gap_numeric"]], textposition="outside",
-    ))
+    fig = go.Figure(
+        go.Bar(
+            x=d["Disease"],
+            y=d["gap_numeric"],
+            marker=dict(color=colors, cornerradius=4),
+            text=[f"{v:+.1%}" for v in d["gap_numeric"]],
+            textposition="outside",
+        )
+    )
     fig.add_hline(y=0, line_color="black", line_width=1)
     fig.update_layout(
-        height=340, margin=dict(l=20, r=20, t=40, b=20),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        height=340,
+        margin=dict(l=20, r=20, t=40, b=20),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         title=dict(text="Domain Shift Gap (CheXpert − NIH)", font=dict(size=14, family="Inter")),
         yaxis=dict(title="AUROC Gap"),
     )
     return fig
 
 
-# ── 데이터 로드 (실제 결과 또는 예시) ─────────────────────────────────────────
 
-def load_or_example(filename: str, example_df: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
-    """체크포인트 디렉토리에서 CSV 로드. 없으면 예시 데이터 반환."""
-    path = CHECKPOINT_DIR / filename
-    if path.exists():
-        return pd.read_csv(path), True
-    return example_df, False
+def chart_region_shift(df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure(
+        go.Pie(
+            labels=df["영역"],
+            values=df["Count"],
+            hole=0.55,
+            marker=dict(colors=["#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#94a3b8"]),
+            textinfo="label+percent",
+            textfont=dict(size=12, family="Inter"),
+        )
+    )
+    fig.update_layout(
+        height=350,
+        margin=dict(l=20, r=20, t=40, b=20),
+        title=dict(text="Grad-CAM 활성화 영역 분포 (100건)", font=dict(size=14, family="Inter")),
+    )
+    return fig
 
 
-# ── 메인 ──────────────────────────────────────────────────────────────────────
+# ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
+def to_context_block(name: str, df: pd.DataFrame) -> str:
+    return f"[{name}]\n{df.to_csv(index=False)}"
 
-st.markdown("""
-<div class="main-header">
-    <h1>📊 CXR-CAD — 분석 결과 대시보드</h1>
-    <p>학습 결과 시각화 · 모델 성능 비교 · Subgroup & External Validation 분석</p>
-</div>
-""", unsafe_allow_html=True)
 
-# 사이드바
-with st.sidebar:
-    st.markdown("## 📊 분석 결과")
-    st.markdown("*학습 후 결과 시각화*")
-    st.divider()
 
-    # 데이터 소스 확인
-    has_real = any((CHECKPOINT_DIR / f).exists() for f in [
-        "densenet_test_results.csv", "class_distribution.png"])
-
-    if has_real:
-        st.success("✅ 실제 결과 데이터 감지됨")
-    else:
-        st.info("ℹ️ 예시 데이터를 표시합니다.\n학습 완료 후 실제 결과로 자동 교체됩니다.")
-
-    st.divider()
-    st.markdown("#### 📌 섹션 이동")
-    sections = [
-        "1. Operating Point", "2. Subgroup Analysis", 
-        "3. External Validation", "4. Error Analysis",
-    ]
-    for s in sections:
-        st.markdown(f"- {s}")
-
-    st.divider()
+def metric_card(label: str, value: str, color: str = "#0f172a") -> None:
     st.markdown(
-        "<div style='text-align:center;opacity:0.45;font-size:0.72rem;'>"
-        "CXR-CAD v0.2.0<br>For Research Use Only</div>",
+        f"""
+        <div class="metric-card">
+            <p class="value" style="color:{color};">{value}</p>
+            <p class="label">{label}</p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
 
-# ── 1. Operating Point ───────────────────────────────────────────────────────
-st.markdown('<div class="section-header">1️⃣ Operating Point 분석 (Cardiomegaly)</div>', unsafe_allow_html=True)
 
-c1, c2 = st.columns([3, 2])
-with c1:
-    fig = chart_operating_point(EXAMPLE_OP)
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-with c2:
-    st.dataframe(EXAMPLE_OP, hide_index=True, width="stretch")
-
-    tab_screen, tab_confirm = st.tabs(["🏥 스크리닝", "🔬 확진 보조"])
-    with tab_screen:
-        st.markdown("""
-        **권장:** Sensitivity 90% (Threshold=0.28)  
-        위음성(놓치는 환자) 최소화 최우선  
-        Trade-off: False Positive ↑ → 추가 검사 비용
-        """)
-    with tab_confirm:
-        st.markdown("""
-        **권장:** Specificity 90% (Threshold=0.56)  
-        불필요한 추가 검사/환자 불안 최소화  
-        Trade-off: 일부 양성 케이스 누락 가능
-        """)
-
-st.divider()
-
-# ── 2. Subgroup Analysis ─────────────────────────────────────────────────────
-st.markdown('<div class="section-header">2️⃣ Subgroup Analysis</div>', unsafe_allow_html=True)
-
-tab_gender, tab_age, tab_view = st.tabs(["👫 Gender", "📅 Age Group", "📐 View Position"])
-
-with tab_gender:
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        fig = chart_subgroup_gender(EXAMPLE_GENDER)
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    with c2:
-        st.dataframe(EXAMPLE_GENDER, hide_index=True, width="stretch")
-
-with tab_age:
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        fig = chart_subgroup_age(EXAMPLE_AGE)
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    with c2:
-        st.dataframe(EXAMPLE_AGE, hide_index=True, width="stretch")
-        st.markdown("""
-        <div class="insight-box">
-        📊 40-60세가 최다 학습 데이터 → 최적 성능<br>
-        60+ 그룹은 동반질환 복잡성으로 성능 하락
-        </div>
-        """, unsafe_allow_html=True)
-
-with tab_view:
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        fig = chart_subgroup_view(EXAMPLE_VIEW)
-        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    with c2:
-        st.dataframe(EXAMPLE_VIEW, hide_index=True, width="stretch")
-        st.markdown("""
-        <div class="warning-box">
-        ⚠️ <b>PA/AP 간 성능 차이 5.2%</b><br>
-        AP는 이동식 응급 촬영이 많아 영상 품질 낮음<br>
-        <b>권장:</b> AP 영상 별도 증강 또는 도메인 적응 적용
-        </div>
-        """, unsafe_allow_html=True)
-
-st.divider()
-
-# ── 3. External Validation ──────────────────────────────────────────────────
-st.markdown('<div class="section-header">3️⃣ External Validation (CheXpert)</div>', unsafe_allow_html=True)
-
-c1, c2 = st.columns(2)
-with c1:
-    fig = chart_external_val(EXAMPLE_EXT)
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-with c2:
-    fig = chart_domain_gap(EXAMPLE_EXT)
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-
-st.dataframe(EXAMPLE_EXT, hide_index=True, width="stretch")
-
-domain_cols = st.columns(3)
-with domain_cols[0]:
-    st.markdown("""
-    <div class="warning-box">
-    <b>촬영 기관</b><br>NIH: 30개 다기관<br>CheXpert: Stanford 단일 기관
-    </div>
-    """, unsafe_allow_html=True)
-with domain_cols[1]:
-    st.markdown("""
-    <div class="warning-box">
-    <b>라벨링 방식</b><br>NIH: NLP 자동 (노이즈 有)<br>CheXpert: 전문의 검토
-    </div>
-    """, unsafe_allow_html=True)
-with domain_cols[2]:
-    st.markdown("""
-    <div class="warning-box">
-    <b>환자군</b><br>NIH: 외래 환자 중심<br>CheXpert: 입원 포함, 중증도↑
-    </div>
-    """, unsafe_allow_html=True)
-
-st.divider()
-
-# ── 4. Error Analysis ───────────────────────────────────────────────────────
-st.markdown('<div class="section-header">4️⃣ Error Analysis (Grad-CAM)</div>', unsafe_allow_html=True)
-
-tab_fp, tab_fn, tab_region = st.tabs(["🔴 False Positive Top 5", "🔵 False Negative Top 5", "🗺️ 폐 영역 이탈 분석"])
-
-with tab_fp:
-    fp_df = pd.DataFrame({
-        "Case":      ["FP-1","FP-2","FP-3","FP-4","FP-5"],
-        "예측":      ["Pneumothorax","Cardiomegaly","Effusion","Nodule","Mass"],
-        "GT":        ["Normal"]*5,
-        "확률":      [0.78, 0.65, 0.72, 0.58, 0.61],
-        "Grad-CAM": ["우측 쇄골 아래 강조","심장 전체 강조","좌측 하단 강조","우측 상단 점","좌측 중간 강조"],
-        "원인":      ["쇄골 경계→기흉 오인","비만 정상 큰 심장","유방 그림자→흉수 오인","혈관 단면→결절 오인","촬영 아티팩트"],
-    })
-    st.dataframe(fp_df, hide_index=True, width="stretch")
-
-with tab_fn:
-    fn_df = pd.DataFrame({
-        "Case":      ["FN-1","FN-2","FN-3","FN-4","FN-5"],
-        "예측":      ["Normal"]*5,
-        "GT":        ["Nodule","Pneumonia","Effusion","Atelectasis","Hernia"],
-        "확률":      [0.12, 0.23, 0.18, 0.21, 0.08],
-        "Grad-CAM": ["심장 영역 집중","분산된 활성화","폐 상부 집중","좌측 폐 무시","폐 영역만 집중"],
-        "원인":      ["작은 결절(5mm) 미탐지","미만성 병변 인식 실패","소량 흉수 미탐지","우측 폐에만 집중","횡격막 영역 무시"],
-    })
-    st.dataframe(fn_df, hide_index=True, width="stretch")
-
-with tab_region:
-    # 도넛 차트
-    region_data = {
-        "영역": ["폐 영역 내","뼈(쇄골/늑골)","의료기기","텍스트/마커","배경"],
-        "Count": [72, 12, 8, 5, 3],
+def heuristic_summary(metric_key: str) -> str:
+    summaries = {
+        "operating_point": (
+            "- Sensitivity 90% 기준은 놓치는 환자를 줄이는 대신 PPV가 0.081로 낮아 추가 검사 부담이 커집니다.\n"
+            "- Specificity 90% 기준은 불필요한 후속 조치를 줄이지만 sensitivity가 0.689로 내려갑니다.\n"
+            "- 따라서 스크리닝과 확진 보조를 같은 threshold로 운영하면 임상 목적이 충돌할 수 있습니다."
+        ),
+        "gender": (
+            "- 평균 AUROC 차이는 작지만 질환별로 편차 방향이 다릅니다.\n"
+            "- Cardiomegaly는 남성 쪽이 높고, Effusion/Hernia는 여성 쪽이 더 높습니다.\n"
+            "- 따라서 전체 평균만 보면 subgroup 편향을 놓칠 수 있습니다."
+        ),
+        "age": (
+            "- 40-60세 구간에서 AUROC가 가장 높고 표본 수도 가장 많습니다.\n"
+            "- 60+ 구간은 성능이 소폭 하락해 고령군 일반화 점검이 필요합니다.\n"
+            "- 표본 수와 질환 복잡도가 함께 성능 차이에 영향을 준 것으로 볼 수 있습니다."
+        ),
+        "view": (
+            "- AP 영상 AUROC가 PA 대비 5.2% 낮아 촬영 조건 차이가 성능에 영향을 줍니다.\n"
+            "- 응급/이동식 촬영 비중이 높은 AP에서 domain shift 가능성이 큽니다.\n"
+            "- View별 augmentation 또는 분리 보정 전략이 우선 후보입니다."
+        ),
+        "external_validation": (
+            "- 내부 NIH 대비 외부 CheXpert 성능이 전반적으로 하락합니다.\n"
+            "- 특히 Pneumonia에서 하락폭이 가장 커 외부 일반화 리스크가 큽니다.\n"
+            "- 외부 데이터 재보정과 threshold 재설정이 필요합니다."
+        ),
+        "domain_gap": (
+            "- 모든 주요 질환에서 외부 데이터 성능이 음의 gap을 보입니다.\n"
+            "- 이는 촬영기관, 라벨링, 환자군 차이의 누적 영향으로 해석할 수 있습니다.\n"
+            "- 배포 전 site-specific calibration 없이는 실제 운영 성능 저하 가능성이 큽니다."
+        ),
+        "error_cases": (
+            "- False positive는 쇄골, 유방 그림자, 혈관 단면처럼 구조적 혼동이 많습니다.\n"
+            "- False negative는 작은 병변과 diffuse pattern에서 집중 실패가 두드러집니다.\n"
+            "- 따라서 hard negative mining과 작은 병변 증강이 우선 과제입니다."
+        ),
+        "region_shift": (
+            "- 13%가 폐 외 영역(의료기기+텍스트/마커)에 반응해 shortcut learning 신호가 있습니다.\n"
+            "- 모델이 병변 자체보다 촬영 문맥에 의존할 위험이 있습니다.\n"
+            "- 폐 영역 마스킹과 attention 제약을 검토할 필요가 있습니다."
+        ),
     }
-    fig = go.Figure(go.Pie(
-        labels=region_data["영역"], values=region_data["Count"],
-        hole=0.55,
-        marker=dict(colors=["#10b981","#f59e0b","#ef4444","#8b5cf6","#94a3b8"]),
-        textinfo="label+percent",
-        textfont=dict(size=12, family="Inter"),
-    ))
-    fig.update_layout(
-        height=350, margin=dict(l=20, r=20, t=40, b=20),
-        title=dict(text="Grad-CAM 활성화 영역 분포 (100건)", font=dict(size=14, family="Inter")),
-    )
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    return summaries.get(metric_key, "- 현재 지표에 대한 규칙 기반 요약이 없습니다.")
 
-    st.markdown("""
-    <div class="warning-box">
-    ⚠️ <b>Shortcut Learning 의심 케이스:</b> 의료기기(8건) + 텍스트/마커(5건) = 13건<br>
-    <b>개선 방향:</b> 마스킹, Attention 메커니즘 적용 권장
-    </div>
-    """, unsafe_allow_html=True)
+
+
+def render_llm_section(metric_key: str, metric_title: str, metric_context: str) -> None:
+    st.markdown('<div class="section-header">🤖 LLM 결론 및 자료 해석</div>', unsafe_allow_html=True)
+
+    api_key = st.session_state.get("analysis_openai_api_key", "").strip()
+    model_name = st.session_state.get("analysis_openai_model", DEFAULT_LLM_MODEL).strip() or DEFAULT_LLM_MODEL
+    ready, import_error = langchain_is_ready()
+
+    summary_cache = st.session_state.setdefault("analysis_llm_summary_cache", {})
+    summary_slot = st.container()
+    cache_key = f"{metric_key}::{model_name}"
+
+    if ready and api_key:
+        if cache_key not in summary_cache:
+            with summary_slot:
+                with st.spinner("LLM이 현재 지표를 분석 중입니다..."):
+                    try:
+                        summary_cache[cache_key] = generate_metric_summary(
+                            metric_title=metric_title,
+                            metric_context=metric_context,
+                            api_key=api_key,
+                            model_name=model_name,
+                        )
+                    except Exception as exc:
+                        summary_cache[cache_key] = f"LLM 요약 생성 실패: {exc}"
+
+        with summary_slot:
+            st.caption(f"모델: {model_name}")
+            st.markdown('<div class="llm-box">', unsafe_allow_html=True)
+            st.markdown(summary_cache[cache_key])
+            st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        with summary_slot:
+            if not ready:
+                st.info(f"LangChain/OpenAI 패키지가 아직 설치되지 않았습니다: {import_error}")
+            elif not api_key:
+                st.info("사이드바에 OpenAI API Key를 넣으면 LLM 해석이 자동 생성됩니다.")
+            st.markdown('<div class="llm-box">', unsafe_allow_html=True)
+            st.markdown("### 임시 해석\n" + heuristic_summary(metric_key))
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-header">💬 LLM에 질문하기</div>', unsafe_allow_html=True)
+    with st.form(key=f"qa_form_{metric_key}"):
+        question = st.text_area(
+            "현재 화면의 지표에 대해 질문하세요.",
+            placeholder="예: AP 촬영에서 성능이 낮은 가장 큰 원인은 무엇으로 보이나요?",
+            key=f"qa_input_{metric_key}",
+            height=110,
+        )
+        submitted = st.form_submit_button("질문 보내기")
+
+    if submitted:
+        if not question.strip():
+            st.warning("질문을 입력해 주세요.")
+        elif not ready:
+            st.warning("질문 응답을 사용하려면 LangChain/OpenAI 패키지 설치가 필요합니다.")
+        elif not api_key:
+            st.warning("질문 응답을 사용하려면 사이드바에 OpenAI API Key를 입력해 주세요.")
+        else:
+            with st.spinner("LLM이 질문에 답하는 중입니다..."):
+                try:
+                    answer = ask_metric_question(
+                        metric_title=metric_title,
+                        metric_context=metric_context,
+                        question=question.strip(),
+                        api_key=api_key,
+                        model_name=model_name,
+                    )
+                    st.session_state[f"qa_answer::{metric_key}"] = answer
+                    st.session_state[f"qa_question::{metric_key}"] = question.strip()
+                except Exception as exc:
+                    st.session_state[f"qa_answer::{metric_key}"] = f"질문 응답 생성 실패: {exc}"
+                    st.session_state[f"qa_question::{metric_key}"] = question.strip()
+
+    saved_answer = st.session_state.get(f"qa_answer::{metric_key}")
+    saved_question = st.session_state.get(f"qa_question::{metric_key}")
+    if saved_answer:
+        st.markdown('<div class="analysis-card">', unsafe_allow_html=True)
+        st.markdown(f"**질문**\n\n{saved_question}")
+        st.markdown("**답변**")
+        st.markdown(saved_answer)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ── 화면별 렌더 함수 ───────────────────────────────────────────────────────────
+def render_operating_point() -> str:
+    st.markdown('<div class="section-header">1️⃣ Operating Point 분석 (Cardiomegaly)</div>', unsafe_allow_html=True)
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        metric_card("권장 스크리닝 Threshold", f"{EXAMPLE_OP.loc[1, 'Threshold']:.2f}", "#2563eb")
+    with k2:
+        metric_card("권장 확진보조 Threshold", f"{EXAMPLE_OP.loc[2, 'Threshold']:.2f}", "#16a34a")
+    with k3:
+        metric_card("최고 NPV", f"{EXAMPLE_OP['NPV'].max():.3f}", "#7c3aed")
+
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.plotly_chart(chart_operating_point(EXAMPLE_OP), use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.dataframe(EXAMPLE_OP, hide_index=True, use_container_width=True)
+        tab_screen, tab_confirm = st.tabs(["🏥 스크리닝", "🔬 확진 보조"])
+        with tab_screen:
+            st.markdown(
+                """
+                **권장:** Sensitivity 90% (Threshold=0.28)  
+                위음성(놓치는 환자) 최소화 최우선  
+                Trade-off: False Positive 증가 → 추가 검사 비용 상승
+                """
+            )
+        with tab_confirm:
+            st.markdown(
+                """
+                **권장:** Specificity 90% (Threshold=0.56)  
+                불필요한 추가 검사/환자 불안 최소화  
+                Trade-off: 일부 양성 케이스 누락 가능
+                """
+            )
+    return (
+        "Metric focus: Operating Point analysis for Cardiomegaly.\n"
+        + to_context_block("Operating Point Table", EXAMPLE_OP)
+        + "\nClinical note: screening should prioritize sensitivity, confirmatory support should prioritize specificity."
+    )
+
+
+
+def render_gender() -> str:
+    st.markdown('<div class="section-header">2️⃣ Subgroup Analysis — Gender</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.plotly_chart(chart_subgroup_gender(EXAMPLE_GENDER), use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.dataframe(EXAMPLE_GENDER, hide_index=True, use_container_width=True)
+        st.markdown(
+            """
+            <div class="insight-box">
+            전체 평균 차이는 작지만 질환별로 편차 방향이 다릅니다.<br>
+            평균값만 보면 특정 질환에서의 subgroup 불균형을 놓칠 수 있습니다.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    return "Metric focus: subgroup analysis by gender.\n" + to_context_block("Gender AUROC", EXAMPLE_GENDER)
+
+
+
+def render_age() -> str:
+    st.markdown('<div class="section-header">3️⃣ Subgroup Analysis — Age Group</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.plotly_chart(chart_subgroup_age(EXAMPLE_AGE), use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.dataframe(EXAMPLE_AGE, hide_index=True, use_container_width=True)
+        st.markdown(
+            """
+            <div class="insight-box">
+            📊 40-60세가 최다 학습 데이터 → 최적 성능<br>
+            60+ 그룹은 동반질환 복잡성으로 성능 하락 가능성
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    return "Metric focus: subgroup analysis by age group.\n" + to_context_block("Age Group AUROC", EXAMPLE_AGE)
+
+
+
+def render_view() -> str:
+    st.markdown('<div class="section-header">4️⃣ Subgroup Analysis — View Position</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.plotly_chart(chart_subgroup_view(EXAMPLE_VIEW), use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.dataframe(EXAMPLE_VIEW, hide_index=True, use_container_width=True)
+        st.markdown(
+            """
+            <div class="warning-box">
+            ⚠️ <b>PA/AP 간 성능 차이 5.2%</b><br>
+            AP는 이동식 응급 촬영이 많아 영상 품질과 분포가 다를 수 있습니다.<br>
+            <b>권장:</b> AP 영상 별도 증강 또는 도메인 적응 적용
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    return "Metric focus: subgroup analysis by view position.\n" + to_context_block("View Position AUROC", EXAMPLE_VIEW)
+
+
+
+def render_external_validation() -> str:
+    st.markdown('<div class="section-header">5️⃣ External Validation (CheXpert)</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.plotly_chart(chart_external_val(EXAMPLE_EXT), use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.dataframe(EXAMPLE_EXT, hide_index=True, use_container_width=True)
+
+    info_cols = st.columns(3)
+    with info_cols[0]:
+        st.markdown(
+            """
+            <div class="warning-box">
+            <b>촬영 기관</b><br>NIH: 30개 다기관<br>CheXpert: Stanford 단일 기관
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with info_cols[1]:
+        st.markdown(
+            """
+            <div class="warning-box">
+            <b>라벨링 방식</b><br>NIH: NLP 자동<br>CheXpert: 전문의 검토
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with info_cols[2]:
+        st.markdown(
+            """
+            <div class="warning-box">
+            <b>환자군</b><br>NIH: 외래 중심<br>CheXpert: 입원 포함, 중증도↑
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    return "Metric focus: external validation between NIH and CheXpert.\n" + to_context_block("External Validation", EXAMPLE_EXT)
+
+
+
+def render_domain_gap() -> str:
+    st.markdown('<div class="section-header">6️⃣ Domain Shift Gap</div>', unsafe_allow_html=True)
+    st.plotly_chart(chart_domain_gap(EXAMPLE_EXT), use_container_width=True, config={"displayModeBar": False})
+    st.dataframe(EXAMPLE_EXT[["Disease", "Gap"]], hide_index=True, use_container_width=True)
+    st.markdown(
+        """
+        <div class="warning-box">
+        외부 데이터셋으로 갈수록 모든 주요 질환에서 음의 gap이 나타납니다.<br>
+        배포 전 site-specific calibration과 threshold 재점검이 필요합니다.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return "Metric focus: domain shift gap between internal and external validation.\n" + to_context_block("Domain Gap", EXAMPLE_EXT)
+
+
+
+def render_error_cases() -> str:
+    st.markdown('<div class="section-header">7️⃣ Error Analysis — False Positive / False Negative</div>', unsafe_allow_html=True)
+    tab_fp, tab_fn = st.tabs(["🔴 False Positive Top 5", "🔵 False Negative Top 5"])
+    with tab_fp:
+        st.dataframe(FALSE_POSITIVE_DF, hide_index=True, use_container_width=True)
+    with tab_fn:
+        st.dataframe(FALSE_NEGATIVE_DF, hide_index=True, use_container_width=True)
+    return (
+        "Metric focus: top false positive and false negative cases.\n"
+        + to_context_block("False Positives", FALSE_POSITIVE_DF)
+        + "\n"
+        + to_context_block("False Negatives", FALSE_NEGATIVE_DF)
+    )
+
+
+
+def render_region_shift() -> str:
+    st.markdown('<div class="section-header">8️⃣ Error Analysis — 폐 영역 이탈 분석</div>', unsafe_allow_html=True)
+    st.plotly_chart(chart_region_shift(REGION_DF), use_container_width=True, config={"displayModeBar": False})
+    st.markdown(
+        """
+        <div class="warning-box">
+        ⚠️ <b>Shortcut Learning 의심:</b> 의료기기(8건) + 텍스트/마커(5건) = 13건<br>
+        <b>개선 방향:</b> 폐 영역 마스킹, attention 제약, artifact suppression 검토
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.dataframe(REGION_DF, hide_index=True, use_container_width=True)
+    return "Metric focus: region shift and shortcut learning evidence.\n" + to_context_block("Region Distribution", REGION_DF)
+
+
+METRIC_PAGES: OrderedDict[str, dict[str, str | Callable[[], str]]] = OrderedDict(
+    {
+        "operating_point": {"label": "1. Operating Point", "title": "Operating Point 분석", "render": render_operating_point},
+        "gender": {"label": "2. Gender", "title": "Subgroup Analysis - Gender", "render": render_gender},
+        "age": {"label": "3. Age Group", "title": "Subgroup Analysis - Age Group", "render": render_age},
+        "view": {"label": "4. View Position", "title": "Subgroup Analysis - View Position", "render": render_view},
+        "external_validation": {"label": "5. External Validation", "title": "External Validation", "render": render_external_validation},
+        "domain_gap": {"label": "6. Domain Shift Gap", "title": "Domain Shift Gap", "render": render_domain_gap},
+        "error_cases": {"label": "7. Error Cases", "title": "Error Analysis - FP/FN", "render": render_error_cases},
+        "region_shift": {"label": "8. Region Shift", "title": "Error Analysis - Region Shift", "render": render_region_shift},
+    }
+)
+
+
+# ── 헤더 ─────────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+<div class="main-header">
+    <h1>📊 CXR-CAD — 분석 결과 대시보드</h1>
+    <p>지표별 화면 전환 · 모델 성능 비교 · LLM 기반 자료 해석 및 질의응답</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# ── 사이드바 ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📊 분석 결과")
+    st.markdown("*지표별 분석 화면*")
+    st.divider()
+
+    has_real = any((CHECKPOINT_DIR / f).exists() for f in ["densenet_test_results.csv", "class_distribution.png"])
+    if has_real:
+        st.success("✅ 실제 결과 데이터 감지됨")
+    else:
+        st.info("ℹ️ 예시 데이터를 표시합니다. 학습 결과가 생성되면 실제 값으로 교체하세요.")
+
+    st.divider()
+    selected_metric = st.radio(
+        "표시할 분석 항목",
+        options=list(METRIC_PAGES.keys()),
+        format_func=lambda key: str(METRIC_PAGES[key]["label"]),
+    )
+
+    st.divider()
+    st.markdown("### 🤖 LLM 설정")
+    st.text_input(
+        "OpenAI API Key",
+        key="analysis_openai_api_key",
+        type="password",
+        value=st.session_state.get("analysis_openai_api_key") or os.environ.get("OPENAI_API_KEY", ""),
+        help="analysis 화면에서만 사용됩니다.",
+    )
+    st.text_input(
+        "LLM 모델명",
+        key="analysis_openai_model",
+        value=st.session_state.get("analysis_openai_model") or DEFAULT_LLM_MODEL,
+        help="예: gpt-4.1-mini",
+    )
+
+    ready, import_error = langchain_is_ready()
+    if ready:
+        st.success("LangChain 의존성이 감지되었습니다.")
+    else:
+        st.warning(f"LangChain 의존성이 없습니다: {import_error}")
+
+    st.divider()
+    st.markdown(
+        "<div style='text-align:center;opacity:0.45;font-size:0.72rem;'>"
+        "CXR-CAD v0.3.0<br>Analysis + LLM Insights"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ── 본문 렌더 ─────────────────────────────────────────────────────────────────
+page_conf = METRIC_PAGES[selected_metric]
+render_fn = page_conf["render"]
+metric_title = str(page_conf["title"])
+
+st.caption(f"현재 화면: {page_conf['label']}")
+metric_context = render_fn()
+render_llm_section(selected_metric, metric_title, metric_context)
