@@ -52,6 +52,7 @@ _COL_FOLLOW   = "Follow-up #"
 def load_nih_csv(csv_path: str) -> pd.DataFrame:
     """
     NIH Data_Entry_2017_v2020.csv를 읽어 멀티-핫 레이블 컬럼을 추가한 DataFrame 반환.
+    12개 폴더의 실제 경로 맵핑
 
     Args:
         csv_path: CSV 파일 경로
@@ -60,6 +61,13 @@ def load_nih_csv(csv_path: str) -> pd.DataFrame:
         DataFrame with columns: Image Index, Patient ID, + 14 disease binary columns
     """
     df = pd.read_csv(csv_path)
+    # 12개 폴더 안의 이미지 전체 경로 찾기
+    img_dir = os.path.join(data_root, 'raw') # data/raw 폴더 기준
+    all_image_paths = glob(os.path.join(img_dir, 'image_*', '*.png'))
+    # 전체경로 딕셔너리 생성
+    image_path_dict = {os.path.basename(x): x for x in all_image_paths}
+    # CSV에 실제 경로 맵핑
+    df['Full_Path'] = df[_COL_IMAGE].map(image_path_dict)
 
     # 멀티-핫 인코딩: "Finding Labels" → 14개 binary 컬럼
     for disease in DISEASE_LABELS:
@@ -207,7 +215,7 @@ class NIHChestXrayDataset(Dataset):
 
         # 이미지 파일 존재 여부 경고 (처음 10개만)
         missing = [
-            row[_COL_IMAGE]
+            row['Full_Path']
             for _, row in self.df.head(10).iterrows()
             if not (self.images_dir / row[_COL_IMAGE]).exists()
         ]
