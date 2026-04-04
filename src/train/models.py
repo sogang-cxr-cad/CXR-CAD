@@ -176,6 +176,13 @@ def build_model(model_name: str, num_classes: int = NUM_CLASSES) -> nn.Module:
 def get_model_info() -> Dict[str, Dict]:
     """UI/API 표시용 모델 메타데이터."""
     return {
+        "ensemble": {
+            "display_name": "Ensemble (Recommended)",
+            "description": "로드된 모든 단일 모델의 결과를 Soft Voting 방식으로 앙상블하여 최고의 정확도를 제공합니다.",
+            "params": "Combined",
+            "input_size": "224×224",
+            "icon": "✨",
+        },
         "densenet": {
             "display_name": "DenseNet-121",
             "description": "Dense connectivity로 gradient vanishing 완화. 파라미터 효율적.",

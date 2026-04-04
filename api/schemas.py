@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 # ── 지원 모델 타입 ────────────────────────────────────────────────────────────
 
-ModelType = Literal["densenet", "efficientnet", "vit"]
+ModelType = Literal["ensemble", "densenet", "efficientnet", "vit"]
 
 
 # ── 응답 스키마 ───────────────────────────────────────────────────────────────

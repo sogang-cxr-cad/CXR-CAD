@@ -7,22 +7,22 @@
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────┐     HTTP/JSON      ┌──────────────────────┐
-│    Streamlit     │ ◄────────────────► │     FastAPI           │
-│    Dashboard     │   localhost:8000   │     Backend           │
-│    (port 8501)   │                    │  GET  /health         │
-│                  │  ?model=densenet   │  GET  /models         │
-│  [Model Select]  │      efficientnet  │  POST /predict        │
-│  DenseNet-121    │      vit           └──────────┬───────────┘
-│  EfficientNet-B4 │                               │ .pth 자동 탐색
-│  ViT-B/16        │                    ┌──────────▼───────────┐
-└─────────────────┘                    │  checkpoints/         │
-                                        │  densenet_best.pth    │
-                                        │  efficientnet_best.pth│
-                                        │  vit_best.pth         │
-                                        │  (없으면 Placeholder) │
-                                        └──────────────────────┘
+```text
+┌───────────────────────────┐     HTTP/JSON      ┌──────────────────────┐
+│         Streamlit         │ ◄────────────────► │     FastAPI          │
+│         Dashboard         │   localhost:8000   │     Backend          │
+│        (port 8501)        │                    │  GET  /health        │
+│                           │  ?model=ensemble   │  GET  /models        │
+│ Model Selection:          │       densenet     │  POST /predict       │
+│ [x] Ensemble (Recommended)│       efficientnet └──────────┬───────────┘
+│ [ ] DenseNet              │       vit                     │ .pth 자동 탐색
+│ [ ] EfficientNet          │                    ┌──────────▼───────────┐
+│ [ ] ViT                   │                    │  checkpoints/         │
+└───────────────────────────┘                    │  densenet_best.pth    │
+                                                 │  efficientnet_best.pth│
+                                                 │  vit_best.pth         │
+                                                 │  (없으면 Placeholder) │
+                                                 └──────────────────────┘
 ```
 
 ## 📁 Project Structure
@@ -176,8 +176,8 @@ API 서버는 `model_state_dict`, `state_dict`, 직접 state_dict 세 가지 포
 | **ViT-B/16** | ~86M | Self-Attention 기반 전역 문맥 학습 |
 | **Soft Voting Ensemble** | — | 3개 모델 확률 평균 |
 
-API 호출 시 `?model=densenet|efficientnet|vit` 파라미터로 모델 선택.  
-대시보드에서는 사이드바 라디오 버튼으로 선택 가능.
+API 호출 시 `?model=ensemble|densenet|efficientnet|vit` 파라미터로 모델 선택.  
+대시보드에서는 사이드바의 체크박스/라디오 버튼으로 선택 가능.
 
 ---
 

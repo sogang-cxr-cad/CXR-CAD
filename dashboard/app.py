@@ -27,6 +27,7 @@ DISEASE_LABELS = [
 ]
 
 MODEL_OPTIONS = {
+    "ensemble":    {"label": "✨ Ensemble (Recommended)", "params": "Combined", "tag": "최고 성능"},
     "densenet":    {"label": "🔗 DenseNet-121",    "params": "~8M",  "tag": "가볍고 빠름"},
     "efficientnet": {"label": "⚡ EfficientNet-B4", "params": "~19M", "tag": "균형 최적화"},
     "vit":         {"label": "🧠 ViT-B/16",        "params": "~86M", "tag": "전역 문맥 학습"},

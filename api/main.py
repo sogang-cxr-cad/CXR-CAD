@@ -157,11 +157,13 @@ async def lifespan(app: FastAPI):
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 
+API_MODELS = SUPPORTED_MODELS + ["ensemble"]
+
 app = FastAPI(
     title="CXR-CAD API",
     description=(
         "흉부 X-ray 컴퓨터 보조 진단 API.\n\n"
-        "**지원 모델**: DenseNet-121, EfficientNet-B4, ViT-B/16\n\n"
+        "**지원 모델**: Ensemble, DenseNet-121, EfficientNet-B4, ViT-B/16\n\n"
         "모델 가중치는 Colab 학습 후 `checkpoints/` 폴더에 `.pth` 파일로 배치합니다.\n"
         "가중치 파일이 없으면 Placeholder 모드로 동작합니다."
     ),
@@ -205,7 +207,15 @@ _PLACEHOLDER_BASE: Dict[str, Dict[str, float]] = {
 
 
 def _placeholder_predict(model_key: str) -> Dict[str, float]:
-    base = _PLACEHOLDER_BASE.get(model_key, _PLACEHOLDER_BASE["densenet"])
+    if model_key == "ensemble":
+        base_probs = {d: 0.0 for d in _PLACEHOLDER_BASE["densenet"].keys()}
+        for k in SUPPORTED_MODELS:
+            for d, p in _PLACEHOLDER_BASE[k].items():
+                base_probs[d] += p / len(SUPPORTED_MODELS)
+        base = base_probs
+    else:
+        base = _PLACEHOLDER_BASE.get(model_key, _PLACEHOLDER_BASE["densenet"])
+        
     return {
         d: round(min(1.0, max(0.0, p + random.uniform(-0.04, 0.04))), 4)
         for d, p in base.items()
@@ -215,11 +225,22 @@ def _placeholder_predict(model_key: str) -> Dict[str, float]:
 # ── 실제 모델 추론 ────────────────────────────────────────────────────────────
 
 def _real_predict(model_key: str, image: Image.Image) -> Dict[str, float]:
-    model  = _model_registry[model_key]
     tensor = preprocess_single_image(image).to(DEVICE)
     with torch.no_grad():
-        logits = model(tensor).squeeze(0)
-        probs  = torch.sigmoid(logits).cpu().tolist()   # logits → 확률
+        if model_key == "ensemble":
+            loaded_models = [m for m in _model_registry.values() if m is not None]
+            if not loaded_models:
+                raise ValueError("Ensemble 추론을 위한 모델이 로드되지 않았습니다.")
+            probs_sum = torch.zeros(len(DISEASE_LABELS), device=DEVICE)
+            for model in loaded_models:
+                logits = model(tensor).squeeze(0)
+                probs_sum += torch.sigmoid(logits)
+            probs = (probs_sum / len(loaded_models)).cpu().tolist()
+        else:
+            model  = _model_registry[model_key]
+            logits = model(tensor).squeeze(0)
+            probs  = torch.sigmoid(logits).cpu().tolist()   # logits → 확률
+            
     return {d: round(float(p), 4) for d, p in zip(DISEASE_LABELS, probs)}
 
 
@@ -242,8 +263,11 @@ async def health_check():
 async def list_models():
     """지원 모델 목록 및 로드 상태 반환."""
     info = get_model_info()
-    for key in SUPPORTED_MODELS:
-        info[key]["is_loaded"] = _model_registry[key] is not None
+    for key in info:
+        if key == "ensemble":
+            info[key]["is_loaded"] = any(m is not None for m in _model_registry.values())
+        else:
+            info[key]["is_loaded"] = _model_registry.get(key) is not None
     return ModelInfoResponse(models=info)
 
 
@@ -251,8 +275,8 @@ async def list_models():
 async def predict(
     file: UploadFile = File(..., description="흉부 X-ray (PNG/JPEG) 또는 DICOM (.dcm)"),
     model: str = Query(
-        default="densenet",
-        description="사용할 모델: densenet | efficientnet | vit",
+        default="ensemble",
+        description="사용할 모델: ensemble | densenet | efficientnet | vit",
     ),
     threshold: float = Query(
         default=DETECTION_THRESHOLD,
@@ -271,10 +295,10 @@ async def predict(
     모델 로드·추론은 서버가 전담합니다.
     """
     model_key = model.lower().strip()
-    if model_key not in SUPPORTED_MODELS:
+    if model_key not in API_MODELS:
         raise HTTPException(
             status_code=400,
-            detail=f"지원하지 않는 모델: '{model}'. 지원 목록: {SUPPORTED_MODELS}",
+            detail=f"지원하지 않는 모델: '{model}'. 지원 목록: {API_MODELS}",
         )
 
     # 파일 읽기
@@ -312,9 +336,19 @@ async def predict(
     # 추론
     start_ms = time.time()
 
-    if _model_registry[model_key] is not None:
-        probs = _real_predict(model_key, image)
+    is_placeholder = False
+    if model_key == "ensemble":
+        if any(m is not None for m in _model_registry.values()):
+            probs = _real_predict(model_key, image)
+        else:
+            is_placeholder = True
     else:
+        if _model_registry.get(model_key) is not None:
+            probs = _real_predict(model_key, image)
+        else:
+            is_placeholder = True
+
+    if is_placeholder:
         time.sleep(0.3)
         probs = _placeholder_predict(model_key)
 
