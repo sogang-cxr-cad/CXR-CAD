@@ -14,7 +14,7 @@
 │        (port 8501)        │                    │  GET  /health        │
 │                           │  ?model=ensemble   │  GET  /models        │
 │ Model Selection:          │       densenet     │  POST /predict       │
-│ [x] Ensemble (Recommended)│       efficientnet └──────────┬───────────┘
+│ [✓] Ensemble (Recommended)│       efficientnet └──────────┬───────────┘
 │ [ ] DenseNet              │       vit                     │ .pth 자동 탐색
 │ [ ] EfficientNet          │                    ┌──────────▼───────────┐
 │ [ ] ViT                   │                    │  checkpoints/         │
