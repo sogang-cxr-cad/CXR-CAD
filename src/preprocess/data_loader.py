@@ -100,22 +100,21 @@ def compute_pos_weight(df: pd.DataFrame) -> torch.Tensor:
 def split_by_patient(
     df: pd.DataFrame,
     test_ratio: float = 0.15,
-    val_ratio: float = 0.15,
     random_state: int = 42,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Patient ID 기준 Train/Val/Test Split (데이터 누수 방지).
+    Patient ID 기준 Train/Test Split (데이터 누수 방지).
 
     동일 환자의 이미지가 서로 다른 세트에 들어가지 않도록 보장합니다.
+    Val 세트는 5-Fold 교차 검증 시 Train 데이터 내에서 동적으로 분할
 
     Args:
         df: 전체 DataFrame
         test_ratio: 테스트 세트 비율 (default 0.15)
-        val_ratio: 검증 세트 비율, 훈련 세트 대비 (default 0.15)
         random_state: Random seed
 
     Returns:
-        (train_df, val_df, test_df)
+        (train_df, test_df)
     """
     rng = np.random.default_rng(random_state)
 
@@ -124,42 +123,33 @@ def split_by_patient(
     rng.shuffle(patients)
 
     n_test = max(1, int(len(patients) * test_ratio))
-    n_val  = max(1, int(len(patients) * val_ratio))
 
     test_patients  = set(patients[:n_test])
-    val_patients   = set(patients[n_test : n_test + n_val])
-    train_patients = set(patients[n_test + n_val :])
+    train_patients = set(patients[n_test:])
 
     train_df = df[df[_COL_PATIENT].isin(train_patients)].reset_index(drop=True)
-    val_df   = df[df[_COL_PATIENT].isin(val_patients)].reset_index(drop=True)
     test_df  = df[df[_COL_PATIENT].isin(test_patients)].reset_index(drop=True)
 
-    return train_df, val_df, test_df
+    return train_df, test_df
 
 
 def verify_no_leakage(
     train_df: pd.DataFrame,
-    val_df: pd.DataFrame,
     test_df: pd.DataFrame,
 ) -> bool:
     """
-    세 세트 간 Patient ID 중복이 없음을 검증.
+    Train과 Test 세트 간 Patient ID 중복이 없음을 검증.
 
     Returns:
         True if no leakage, raises AssertionError otherwise.
     """
     train_pts = set(train_df[_COL_PATIENT])
-    val_pts   = set(val_df[_COL_PATIENT])
     test_pts  = set(test_df[_COL_PATIENT])
 
-    assert train_pts.isdisjoint(val_pts),  "❌ 데이터 누수: Train ∩ Val 환자 존재"
     assert train_pts.isdisjoint(test_pts), "❌ 데이터 누수: Train ∩ Test 환자 존재"
-    assert val_pts.isdisjoint(test_pts),   "❌ 데이터 누수: Val ∩ Test 환자 존재"
-
     print(
         f"✅ 데이터 누수 없음 확인\n"
         f"   Train: {len(train_df):,} images / {len(train_pts):,} patients\n"
-        f"   Val  : {len(val_df):,} images / {len(val_pts):,} patients\n"
         f"   Test : {len(test_df):,} images / {len(test_pts):,} patients"
     )
     return True
@@ -231,7 +221,10 @@ class NIHChestXrayDataset(Dataset):
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        img_path = self.images_dir / row[_COL_IMAGE]
+        if 'FULL_Path' in row and pd.notna(row['Full_Path']):
+            img_path = Path(row['Full_Path'])
+        else:
+            img_path = self.images_dir / row[_COL_IMAGE]
 
         # 이미지 로드 (파일 없으면 빈 tensor 반환)
         if img_path.exists():
@@ -330,8 +323,8 @@ def build_dataloaders(
     images_dir = os.path.join(data_root, "images")
 
     df = load_nih_csv(csv_path)
-    train_df, val_df, test_df = split_by_patient(df, test_ratio, val_ratio)
-    verify_no_leakage(train_df, val_df, test_df)
+    train_df, test_df = split_by_patient(df, test_ratio)
+    verify_no_leakage(train_df, test_df)
 
     pos_weight = compute_pos_weight(train_df)
 
@@ -341,6 +334,5 @@ def build_dataloaders(
         "test":       create_dataloader(test_df,  images_dir, eval_transform,  batch_size, num_workers, shuffle=False),
         "pos_weight": pos_weight,
         "train_df":   train_df,
-        "val_df":     val_df,
         "test_df":    test_df,
     }
