@@ -3,8 +3,6 @@ Patient-wise Train/Validation/Test Split 유틸리티.
 
 NIH ChestX-ray14는 동일 환자의 이미지가 여러 장 포함될 수 있으므로,
 환자 ID 기준으로 분할하여 data leakage를 방지합니다.
-
-분할 비율 기본값: Train 70% / Val 10% / Test 20%
 """
 
 from __future__ import annotations
@@ -18,8 +16,8 @@ import pandas as pd
 def patient_wise_split(
     df: pd.DataFrame,
     patient_col: str = "Patient ID",
-    val_ratio: float = 0.10,
-    test_ratio: float = 0.20,
+    val_ratio: float = 0.0,
+    test_ratio: float = 0.15,
     seed: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """

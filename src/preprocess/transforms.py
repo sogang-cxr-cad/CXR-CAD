@@ -27,7 +27,7 @@ IMAGENET_STD  = [0.229, 0.224, 0.225]
 
 def apply_clahe(
     image: Image.Image,
-    clip_limit: float = 2.0,
+    clip_limit: float = 4.0,
     tile_grid_size: Tuple[int, int] = (8, 8),
 ) -> Image.Image:
     """
@@ -59,7 +59,7 @@ class CLAHETransform:
 
     def __init__(
         self,
-        clip_limit: float = 2.0,
+        clip_limit: float = 4.0,
         tile_grid_size: Tuple[int, int] = (8, 8),
     ):
         self.clip_limit = clip_limit
@@ -85,7 +85,7 @@ def get_train_transforms(image_size: int = 224) -> transforms.Compose:
     RandomAffine → ColorJitter → ToTensor → Normalize
     """
     return transforms.Compose([
-        CLAHETransform(clip_limit=2.0, tile_grid_size=(8, 8)),
+        CLAHETransform(clip_limit=4.0, tile_grid_size=(8, 8)),
         transforms.Resize((image_size, image_size)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=10),
@@ -103,7 +103,7 @@ def get_inference_transforms(image_size: int = 224) -> transforms.Compose:
     CLAHE → Resize → ToTensor → Normalize
     """
     return transforms.Compose([
-        CLAHETransform(clip_limit=2.0, tile_grid_size=(8, 8)),
+        CLAHETransform(clip_limit=4.0, tile_grid_size=(8, 8)),
         transforms.Resize((image_size, image_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
@@ -121,7 +121,7 @@ def get_tta_transforms(image_size: int = 224) -> list:
         List[transforms.Compose]
     """
     base = [
-        CLAHETransform(clip_limit=2.0, tile_grid_size=(8, 8)),
+        CLAHETransform(clip_limit=4.0, tile_grid_size=(8, 8)),
         transforms.Resize((image_size, image_size)),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
