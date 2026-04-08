@@ -3,13 +3,6 @@ NIH ChestX-ray14 Data Loader.
 
 실제 데이터 로딩, Patient ID 기준 5-Fold GroupKFold Split,
 데이터 누수 검증, pos_weight 계산을 제공합니다.
-
-데이터 구조:
-    data_root/
-    ├── images/
-    │   ├── 00000001_000.png
-    │   └── ...
-    └── Data_Entry_2017_v2020.csv
 """
 
 from __future__ import annotations
@@ -18,6 +11,7 @@ import os
 import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
+from glob import glob # glob 추가
 
 import numpy as np
 import pandas as pd
@@ -37,7 +31,6 @@ DISEASE_LABELS: List[str] = [
 
 NUM_CLASSES = len(DISEASE_LABELS)
 
-# NIH CSV 컬럼명
 _COL_IMAGE    = "Image Index"
 _COL_FINDING  = "Finding Labels"
 _COL_PATIENT  = "Patient ID"
@@ -49,27 +42,20 @@ _COL_FOLLOW   = "Follow-up #"
 
 # ── CSV 파싱 ──────────────────────────────────────────────────────────────────
 
-def load_nih_csv(csv_path: str) -> pd.DataFrame:
+def load_nih_csv(data_root: str) -> pd.DataFrame:
     """
-    NIH Data_Entry_2017_v2020.csv를 읽어 멀티-핫 레이블 컬럼을 추가한 DataFrame 반환.
-    12개 폴더의 실제 경로 맵핑
-
-    Args:
-        csv_path: CSV 파일 경로
-
-    Returns:
-        DataFrame with columns: Image Index, Patient ID, + 14 disease binary columns
+    NIH CSV를 읽어 멀티-핫 레이블 컬럼을 추가한 DataFrame 반환.
     """
+    csv_path = os.path.join(data_root, "Data_Entry_2017_v2020.csv")
+    
     df = pd.read_csv(csv_path)
-    # 12개 폴더 안의 이미지 전체 경로 찾기
-    img_dir = os.path.join(data_root, 'raw') # data/raw 폴더 기준
+    
+    img_dir = os.path.join(data_root, 'raw') 
     all_image_paths = glob(os.path.join(img_dir, 'image_*', '*.png'))
-    # 전체경로 딕셔너리 생성
+    
     image_path_dict = {os.path.basename(x): x for x in all_image_paths}
-    # CSV에 실제 경로 맵핑
     df['Full_Path'] = df[_COL_IMAGE].map(image_path_dict)
 
-    # 멀티-핫 인코딩: "Finding Labels" → 14개 binary 컬럼
     for disease in DISEASE_LABELS:
         df[disease] = df[_COL_FINDING].apply(
             lambda findings: 1.0 if disease in findings.split("|") else 0.0
@@ -79,16 +65,6 @@ def load_nih_csv(csv_path: str) -> pd.DataFrame:
 
 
 def compute_pos_weight(df: pd.DataFrame) -> torch.Tensor:
-    """
-    불균형 데이터 보정을 위한 pos_weight 계산.
-    pos_weight[i] = (음성 샘플 수) / (양성 샘플 수) per class.
-
-    Args:
-        df: load_nih_csv() 반환 DataFrame (학습 세트만 전달할 것)
-
-    Returns:
-        Tensor of shape (14,) for BCEWithLogitsLoss / FocalLoss
-    """
     pos_counts = df[DISEASE_LABELS].sum(axis=0).values.astype(float)
     neg_counts = len(df) - pos_counts
     pos_weight = neg_counts / np.clip(pos_counts, 1, None)
@@ -102,23 +78,7 @@ def split_by_patient(
     test_ratio: float = 0.15,
     random_state: int = 42,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Patient ID 기준 Train/Test Split (데이터 누수 방지).
-
-    동일 환자의 이미지가 서로 다른 세트에 들어가지 않도록 보장합니다.
-    Val 세트는 5-Fold 교차 검증 시 Train 데이터 내에서 동적으로 분할
-
-    Args:
-        df: 전체 DataFrame
-        test_ratio: 테스트 세트 비율 (default 0.15)
-        random_state: Random seed
-
-    Returns:
-        (train_df, test_df)
-    """
     rng = np.random.default_rng(random_state)
-
-    # Patient 단위로 Shuffle 후 분할
     patients = df[_COL_PATIENT].unique()
     rng.shuffle(patients)
 
@@ -137,12 +97,6 @@ def verify_no_leakage(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
 ) -> bool:
-    """
-    Train과 Test 세트 간 Patient ID 중복이 없음을 검증.
-
-    Returns:
-        True if no leakage, raises AssertionError otherwise.
-    """
     train_pts = set(train_df[_COL_PATIENT])
     test_pts  = set(test_df[_COL_PATIENT])
 
@@ -159,20 +113,9 @@ def get_group_kfold_splits(
     train_df: pd.DataFrame,
     n_splits: int = 5,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """
-    Patient ID 기준 5-Fold GroupKFold Splits 반환.
-
-    Args:
-        train_df: 훈련 DataFrame (split_by_patient 결과)
-        n_splits: Fold 수 (default 5)
-
-    Returns:
-        List of (train_idx, val_idx) tuples (array of row indices)
-    """
     gkf = GroupKFold(n_splits=n_splits)
     groups = train_df[_COL_PATIENT].values
     X = np.arange(len(train_df))
-
     splits = list(gkf.split(X, groups=groups))
     print(f"✅ {n_splits}-Fold GroupKFold Splits 준비 완료")
     return splits
@@ -181,16 +124,6 @@ def get_group_kfold_splits(
 # ── PyTorch Dataset ───────────────────────────────────────────────────────────
 
 class NIHChestXrayDataset(Dataset):
-    """
-    NIH ChestX-ray14 PyTorch Dataset.
-
-    Args:
-        df: load_nih_csv() 반환 DataFrame (split 적용 후)
-        images_dir: images/ 폴더 경로
-        transform: torchvision / albumentations 변환 파이프라인
-        return_meta: True이면 (image, label, meta_dict) 반환
-    """
-
     def __init__(
         self,
         df: pd.DataFrame,
@@ -203,36 +136,21 @@ class NIHChestXrayDataset(Dataset):
         self.transform = transform
         self.return_meta = return_meta
 
-        # 이미지 파일 존재 여부 경고 (처음 10개만)
-        missing = [
-            row['Full_Path']
-            for _, row in self.df.head(10).iterrows()
-            if not (self.images_dir / row[_COL_IMAGE]).exists()
-        ]
-        if missing:
-            warnings.warn(
-                f"⚠️  images_dir에 이미지 없음 (예시): {missing[:3]}\n"
-                f"   경로 확인: {self.images_dir}",
-                UserWarning,
-            )
-
     def __len__(self) -> int:
         return len(self.df)
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        if 'FULL_Path' in row and pd.notna(row['Full_Path']):
+        
+        if 'Full_Path' in row and pd.notna(row['Full_Path']):
             img_path = Path(row['Full_Path'])
         else:
             img_path = self.images_dir / row[_COL_IMAGE]
 
-        # 이미지 로드 (파일 없으면 빈 tensor 반환)
         if img_path.exists():
             image = Image.open(img_path).convert("RGB")
         else:
-            image = Image.fromarray(
-                np.zeros((224, 224, 3), dtype=np.uint8)
-            )
+            image = Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))
 
         if self.transform is not None:
             image = self.transform(image)
@@ -240,7 +158,6 @@ class NIHChestXrayDataset(Dataset):
             import torchvision.transforms as T
             image = T.ToTensor()(image)
 
-        # 멀티-핫 레이블
         label = torch.tensor(
             row[DISEASE_LABELS].values.astype(np.float32),
             dtype=torch.float32,
@@ -270,21 +187,6 @@ def create_dataloader(
     shuffle: bool = False,
     return_meta: bool = False,
 ) -> DataLoader:
-    """
-    NIHChestXrayDataset → DataLoader 팩토리.
-
-    Args:
-        df: 해당 split의 DataFrame
-        images_dir: images/ 폴더 경로
-        transform: 변환 파이프라인
-        batch_size: 배치 크기
-        num_workers: 병렬 로드 수
-        shuffle: 학습 세트에 True
-        return_meta: 메타데이터 함께 반환 여부
-
-    Returns:
-        DataLoader
-    """
     dataset = NIHChestXrayDataset(
         df=df,
         images_dir=images_dir,
@@ -310,27 +212,18 @@ def build_dataloaders(
     train_transform=None,
     eval_transform=None,
     test_ratio: float = 0.15,
-    val_ratio: float = 0.15,
 ) -> Dict[str, DataLoader]:
-    """
-    CSV 로드 → Split → 누수 검증 → DataLoader 생성 원스톱 함수.
-
-    Returns:
-        {"train": DataLoader, "val": DataLoader, "test": DataLoader,
-         "pos_weight": Tensor, "train_df": DataFrame}
-    """
-    csv_path = os.path.join(data_root, "Data_Entry_2017_v2020.csv")
     images_dir = os.path.join(data_root, "images")
 
-    df = load_nih_csv(csv_path)
+    df = load_nih_csv(data_root)
     train_df, test_df = split_by_patient(df, test_ratio)
     verify_no_leakage(train_df, test_df)
 
     pos_weight = compute_pos_weight(train_df)
 
+    # val 관련 코드 완전 삭제 (5-Fold에 맞춰 수정)
     return {
         "train":      create_dataloader(train_df, images_dir, train_transform, batch_size, num_workers, shuffle=True),
-        "val":        create_dataloader(val_df,   images_dir, eval_transform,  batch_size, num_workers, shuffle=False),
         "test":       create_dataloader(test_df,  images_dir, eval_transform,  batch_size, num_workers, shuffle=False),
         "pos_weight": pos_weight,
         "train_df":   train_df,
