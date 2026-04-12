@@ -46,7 +46,7 @@ def load_nih_csv(data_root: str) -> pd.DataFrame:
     """
     NIH CSV를 읽어 멀티-핫 레이블 컬럼을 추가한 DataFrame 반환.
     """
-    csv_path = os.path.join(data_root, "Data_Entry_2017_2020.csv")
+    csv_path = os.path.join(data_root, "Data_Entry_2017.csv")
     
     df = pd.read_csv(csv_path)
     
