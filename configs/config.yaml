@@ -27,7 +27,7 @@ kaggle:
   # NIH 224×224 pre-resized dataset slug 예시:
   #   - nih-chest-xrays               (공식 원본, 1024px → transforms로 224 변환)
   #   - nih-chest-xray-14-images-224  (224px 사전 리사이즈 버전, 있는 경우)
-  nih_dir: "/kaggle/input/nih-chest-xrays" # ← 실제 slug로 변경 필요
+  nih_dir: "/kaggle/input/datasets/organizations/nih-chest-xrays/data" # ← 실제 slug로 변경 필요
   nih_csv: "Data_Entry_2017_v2020.csv" # CSV 파일명
 
   # CheXpert: Stanford 라이선스 신청 후 Kaggle Private Dataset으로 업로드
