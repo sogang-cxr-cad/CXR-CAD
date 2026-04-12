@@ -50,8 +50,8 @@ def load_nih_csv(data_root: str) -> pd.DataFrame:
     
     df = pd.read_csv(csv_path)
     
-    img_dir = os.path.join(data_root, 'raw') 
-    all_image_paths = glob(os.path.join(img_dir, 'image_*', '*.png'))
+    # 캐글 서버 구조(images_001/images/...) 혹은 하위 폴더 어디든 이미지가 있는 경우 대응
+    all_image_paths = glob(os.path.join(data_root, "**", "*.png"), recursive=True)
     
     image_path_dict = {os.path.basename(x): x for x in all_image_paths}
     df['Full_Path'] = df[_COL_IMAGE].map(image_path_dict)
