@@ -36,6 +36,11 @@ CXR-CAD/
 ├── configs/
 │   └── config.yaml                     # 학습 하이퍼파라미터 (모델·데이터·학습 설정)
 │
+├── scripts/
+│   ├── download_data.sh                # Kaggle API 기반 데이터셋 자동 다운로드 (NIH, CheXpert)
+│   ├── run_optuna.py                   # Vast.ai 기반 Optuna 하이퍼파라미터 자동 최적화
+│   └── train.py                        # 스탠드얼론 파이썬 학습 스크립트
+│
 ├── src/
 │   ├── preprocess/
 │   │   ├── data_loader.py              # NIH CSV 파싱, Patient-ID Split, pos_weight 계산
@@ -123,25 +128,19 @@ docker-compose up --build
 pytest tests/ -v
 ```
 
-### 6. 모델 파이프라인 및 학습 (Kaggle 권장)
+### 6. 하이브리드 워크플로우 (Vast.ai + Kaggle 권장)
 
-본 프로젝트는 **Kaggle** 플랫폼을 통해 모델 학습 및 심층 분석을 수행하는 것을 권장합니다. 상세한 환경 구축은 [`KAGGLE_SETUP.md`](KAGGLE_SETUP.md)를, 팀별 작업 흐름은 [`TEAM_WORKFLOW.md`](TEAM_WORKFLOW.md)를 참고하세요.
+비용 효율의 극대화를 위해 **무거운 학습/HPO는 Vast.ai**, UI 시각화가 필요한 **가벼운 통계/분석은 Kaggle**에서 분리하여 수행하는 것을 권장합니다. 상세한 환경 구축은 [`VASTAI_SETUP.md`](VASTAI_SETUP.md)를, 전체 작업 흐름은 [`TEAM_WORKFLOW.md`](TEAM_WORKFLOW.md)를 참고하세요.
 
-- **데이터 준비 및 튜닝**: `01_EDA.ipynb` ~ `03_Focal_Loss_Experiment.ipynb`
-- **본 학습**: `04_Training.ipynb` (5-Fold 학습, `.pth` 저장)
-- **심층 검증**: `05_Operating_Point.ipynb` ~ `09_Error_Analysis.ipynb` (지표 보정 및 오답 원인 규명)
-
-*(로컬 GPU 서버를 갖춘 경우 아래 CLI로 학습 스크립트를 직접 실행할 수도 있습니다.)*
-
-```bash
-# configs/config.yaml 사전 설정 후 실행 
-# DenseNet-121 (gamma=0, 5-Fold GroupKFold)
-python -m src.train.trainer --config configs/config.yaml --model densenet
-
-# 그 외 모델 
-python -m src.train.trainer --config configs/config.yaml --model efficientnet
-python -m src.train.trainer --config configs/config.yaml --model vit
-```
+1. **데이터 준비 및 최적화 진행 (Vast.ai)**:
+   ```bash
+   # 데이터셋 자동 다운로드 (NIH + CheXpert)
+   bash scripts/download_data.sh
+   # Optuna 하이퍼파라미터 최적화 (tmux 백그라운드)
+   python scripts/run_optuna.py --n_trials 50
+   ```
+2. **본 학습 도출 (Vast.ai)**: 발견된 설정으로 단일 혹은 전체 학습을 스크립트로 동작합니다 (`python scripts/train.py --fold 1`).
+3. **업로드 및 심층 검증 (Kaggle)**: 추출된 `.pth` 최적 가중치를 Kaggle Private Dataset으로 올려 `05_Operating_Point.ipynb` ~ `09_Error_Analysis.ipynb` 노트북을 이용해 무료 T4 환경에서 검증/시각화합니다.
 
 학습이 완료되면 `checkpoints/<model_key>_best.pth` 형식으로 저장됩니다.
 
@@ -420,11 +419,12 @@ Temperature = 1.8 (학습됨)
 |------|------|
 | **ML Framework** | PyTorch 2.2 · torchvision · timm |
 | **모델** | DenseNet-121 · EfficientNet-B4 · ViT-B/16 |
+| **최적화** | Optuna (HPO) |
 | **전처리** | OpenCV (CLAHE) · pydicom · albumentations |
 | **평가** | scikit-learn · scipy |
 | **Backend** | FastAPI · Pydantic · Uvicorn |
 | **Frontend** | Streamlit · Plotly |
-| **인프라** | Docker · CUDA 12.1 |
-| **데이터셋** | NIH ChestX-ray14 (112,120 images, 14 classes) |
+| **인프라** | Vast.ai · Kaggle API · Docker · CUDA 12.1 |
+| **데이터셋** | NIH ChestX-ray14 (학습/내부 검증) · CheXpert (외부 검증) |
 | **테스트** | pytest |
 | **설정** | YAML (configs/config.yaml) |

@@ -60,25 +60,125 @@ class EarlyStopping:
 
 class Trainer:
     """
-    CXR-CAD 모델 학습 루프 (뼈대).
+    CXR-CAD 모델 학습 루프.
+    Optuna HPO(Hyperparameter Optimization)를 위해 trial.report 및 Pruning을 지원.
 
-    TODO: Colab(04_Training.ipynb)에서 아래 기능을 구현합니다.
-      - train_one_epoch(): 배치 학습, 손실 계산, gradient update
-      - validate()       : 검증 AUROC 계산
-      - save_checkpoint(): best model .pth 저장
-      - fit()            : epoch 루프 + early stopping
-
-    체크포인트 저장 포맷 (api/main.py 로드 호환):
+    체크포인트 저장 포맷:
         torch.save({
             "epoch"            : epoch,
             "model_state_dict" : model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "val_auroc"        : best_auroc,
-            "val_auprc"        : best_auprc,   # README 5-Fold 표 AUPRC 열 해당
+            "val_auprc"        : best_auprc,
         }, "checkpoints/<model_key>_best.pth")
     """
 
-    def __init__(self, model, optimizer, loss_fn, device, early_stopping=None):
-        raise NotImplementedError(
-            "Trainer는 Colab(04_Training.ipynb)에서 구현합니다."
-        )
+    def __init__(self, model, optimizer, criterion, device, early_stopping=None,
+                 scheduler=None, use_amp=True, grad_clip=1.0, 
+                 checkpoint_path="checkpoints/best.pth"):
+        self.model = model
+        self.optimizer = optimizer
+        self.criterion = criterion
+        self.device = device
+        self.early_stopping = early_stopping
+        self.scheduler = scheduler
+        self.use_amp = use_amp
+        self.grad_clip = grad_clip
+        self.checkpoint_path = checkpoint_path
+        
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
+        self.best_auroc = 0.0
+        self.best_auprc = 0.0
+        self.history = []
+
+        import pathlib
+        pathlib.Path(self.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def train_one_epoch(self, loader):
+        import torch.nn as nn
+        from tqdm.auto import tqdm
+        self.model.train()
+        running_loss = 0.0
+        for images, labels in tqdm(loader, desc='  Train', leave=False):
+            images = images.to(self.device, non_blocking=True)
+            labels = labels.to(self.device, non_blocking=True)
+            
+            self.optimizer.zero_grad()
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                logits = self.model(images)
+                loss = self.criterion(logits, labels)
+                
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
+            nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            
+            running_loss += loss.item()
+        return running_loss / len(loader)
+
+    @torch.no_grad()
+    def evaluate(self, loader, disease_labels):
+        import torch
+        import numpy as np
+        from tqdm.auto import tqdm
+        from src.analysis.evaluation import compute_auroc, compute_auprc
+
+        self.model.eval()
+        all_probs, all_targets = [], []
+        for images, labels in tqdm(loader, desc='  Eval ', leave=False):
+            images = images.to(self.device, non_blocking=True)
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                logits = self.model(images)
+            probs = torch.sigmoid(logits).cpu().numpy()
+            all_probs.append(probs)
+            all_targets.append(labels.numpy())
+            
+        y_prob = np.concatenate(all_probs, axis=0)
+        y_true = np.concatenate(all_targets, axis=0)
+        
+        auroc_dict = compute_auroc(y_true, y_prob, disease_labels)
+        auprc_dict = compute_auprc(y_true, y_prob, disease_labels)
+        
+        return auroc_dict['macro_avg'], auprc_dict['macro_avg'], y_true, y_prob
+
+    def fit(self, train_loader, val_loader, epochs, disease_labels, optuna_trial=None):
+        import time
+        import torch
+
+        for epoch in range(1, epochs + 1):
+            t0 = time.time()
+            loss = self.train_one_epoch(train_loader)
+            auroc, auprc, _, _ = self.evaluate(val_loader, disease_labels)
+            
+            if self.scheduler:
+                self.scheduler.step()
+                
+            elapsed = time.time() - t0
+            self.history.append({'epoch': epoch, 'loss': loss, 'auroc': auroc, 'auprc': auprc})
+            print(f'  Epoch {epoch:3d}/{epochs} | loss={loss:.4f} | AUROC={auroc:.4f} | AUPRC={auprc:.4f} | {elapsed:.0f}s')
+
+            if auroc > self.best_auroc:
+                self.best_auroc = auroc
+                self.best_auprc = auprc
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'val_auroc': self.best_auroc,
+                    'val_auprc': self.best_auprc,
+                }, self.checkpoint_path)
+                print(f'  ★ Best checkpoint saved → {self.checkpoint_path}')
+
+            if optuna_trial:
+                import optuna
+                optuna_trial.report(auroc, epoch)
+                if optuna_trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            if self.early_stopping and self.early_stopping(auroc):
+                print(f'  Early stopping at epoch {epoch}')
+                break
+                
+        import pandas as pd
+        return self.best_auroc, self.best_auprc, pd.DataFrame(self.history)

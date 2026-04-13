@@ -53,21 +53,26 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
 - [x] **`src/train/models.py` & `src/train/focal_loss.py` 점검**
   - DenseNet, EfficientNet, ViT 클래스가 `logits` 형태로 값을 제대로 출력하는지 점검. (Sigmoid 제거 확인).
   - 클래스 불균형 해결을 위한 Focal Loss 파라미터(`pos_weight`, `gamma`) 확인.
-- [x] **Kaggle GPU 학습 환경 구성 (`KAGGLE_SETUP.md` 필독)**
-  - 제공된 `notebooks/04_Training.ipynb` 또는 작성할 `trainer.py`를 활용하여 Kaggle 환경에서 P100 x 2 (or T4 x 2) 등 GPU 세팅 및 리소스 최적화.
-- [ ] **본격적인 학습 진행 (Phase 2. 메인 모델 학습)**
-  - Kaggle의 가속기(T4 x 2)를 활용해 `notebooks/04_Training.ipynb` 파이프라인을 구동, 5-Fold 학습을 돌리고 최고 성능 모델을 선정합니다.
+- [x] **Vast.ai GPU 학습 환경 구성 (`VASTAI_SETUP.md` 필독)**
+  - 리소스 제한과 12시간의 제약을 돌파하기 위해 학습 파이프라인을 파이썬 스크립트(`scripts/train.py`, `run_optuna.py`)로 분리.
+  - `download_data.sh` 스크립트를 통한 데이터 자동 다운로드 및 세팅 테스트 완료.
+- [ ] **본격적인 학습 진행 (Phase 2. HPO 및 메인 모델 학습)**
+  - Vast.ai의 고성능 GPU(RTX 3090/4090) 인스턴스에서 `tmux`를 활용, `scripts/run_optuna.py`를 실행하여 며칠간 최적의 파라미터를 도출.
+  - 탐색된 최적 파라미터로 `scripts/train.py`를 수행하여 5-Fold를 완주하고 최고 성능 모델 가중치를 획득.
 - [ ] **⚠️ 학습 모델 및 분석 결과 저장 규칙! (핵심)**
   - 학습 완료 후 최종 가중치 파일(`.pth`), 평가 결괏값(`.csv`) 등 산출물은 반드시 리포지토리의 **`checkpoints/` 폴더 내부에 저장**해야 Backend에서 즉시 로드할 수 있습니다.
   - 예시 파일: `checkpoints/densenet121_fold1.pth`, `checkpoints/densenet_test_results.csv`, `checkpoints/class_distribution.png`
+- [ ] **하이브리드 분석 워크플로우 (Kaggle)**
+  - Vast.ai에서 생성 및 다운로드된 `.pth` 최적 가중치 파일들을 캐글에 Private Dataset으로 업로드합니다.
+  - 비용 절감을 위해 추론/분석 작업은 캐글의 무료 T4 환경에서 진행하는 것을 권장합니다.
 - [ ] **External Validation (Phase 3. 평가 및 검증)**
-  - 학습된 `.pth` Output Dataset을 마운트하고, `notebooks/08_External_Validation.ipynb` 노트북에서 도메인 시프트(Domain Shift) 파악.
+  - 가중치 데이터셋을 마운트하고, `notebooks/08_External_Validation.ipynb`에서 도메인 시프트(Domain Shift) 파악.
 - [ ] **주제별 심층 분석 및 최적화 (Phase 1 & Phase 3. 노트북 분석 진행)**
-  - **[Phase 1]** `notebooks/03_Focal_Loss_Experiment.ipynb`: 모델 학습 전 클래스 불균형 완화를 위한 γ 파라미터 튜닝.
+  - **[Phase 1]** `notebooks/03_Focal_Loss_Experiment.ipynb`: 기본 γ 파라미터 탐색 (현행 Optuna 로 대체 가능).
   - **[Phase 3]** `notebooks/05_Operating_Point.ipynb`: 목적(스크리닝 vs 확진 보조)에 따른 Cut-off 임계값 결정.
   - **[Phase 3]** `notebooks/06_Calibration.ipynb`: Temperature Scaling을 이용한 모델 Confidence 확률 보정 수치 탐색.
-  - **[Phase 3]** `notebooks/07_Subgroup_Analysis.ipynb`: 성별, 연령대 별 모델의 진단 성능 편향성(Fairness) 유무 검토.
-  - **[Phase 3]** `notebooks/09_Error_Analysis.ipynb`: FP/FN 오답 케이스를 추출하고 Grad-CAM으로 Shortcut Learning 여부 규명.
+  - **[Phase 3]** `notebooks/07_Subgroup_Analysis.ipynb`: 성별, 연령대 별 편향성(Fairness) 유무 검토.
+  - **[Phase 3]** `notebooks/09_Error_Analysis.ipynb`: FP/FN 오답을 추출하고 Grad-CAM으로 Shortcut Learning 원인 분석.
 
 ---
 
