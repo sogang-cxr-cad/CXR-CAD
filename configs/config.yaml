@@ -14,7 +14,7 @@
 data:
   data_root: "data/nih" # NIH 루트 (images/, *.csv 포함)
   image_dir: "data/nih/images" # NIH ChestX-ray14 이미지 폴더
-  metadata_csv: "data/nih/Data_Entry_2017_v2020.csv"
+  metadata_csv: "data/nih/Data_Entry_2017.csv"
   image_size: 224 # 모델 입력 크기 (px)
   # val_ratio:    0.15                              # 5-Fold 교차 검증을 위해 val 제거
   test_ratio: 0.15 # 환자 기준 Test 비율
@@ -28,11 +28,11 @@ kaggle:
   #   - nih-chest-xrays               (공식 원본, 1024px → transforms로 224 변환)
   #   - nih-chest-xray-14-images-224  (224px 사전 리사이즈 버전, 있는 경우)
   nih_dir: "/kaggle/input/datasets/organizations/nih-chest-xrays/data" # ← 실제 slug로 변경 필요
-  nih_csv: "Data_Entry_2017_v2020.csv" # CSV 파일명
+  nih_csv: "Data_Entry_2017.csv" # CSV 파일명
 
   # CheXpert: Stanford 라이선스 신청 후 Kaggle Private Dataset으로 업로드
   # 업로드 slug 예시: chexpert-v1 (사용자가 지정한 이름)
-  chexpert_dir: "/kaggle/input/chexpert-v1/CheXpert-v1.0-small"
+  chexpert_dir: "/kaggle/input/datasets/ashery/chexpert"
 
   working_dir: "/kaggle/working" # 체크포인트 저장 위치
 
