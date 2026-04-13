@@ -13,6 +13,13 @@ API 서버(api/main.py)가 자동으로 로드합니다.
 from __future__ import annotations
 
 # TODO: Colab 노트북에서 구현 후 이 파일에 이식합니다.
+import torch
+import torch.nn as nn
+import numpy as np
+import pathlib
+import time
+import pandas as pd
+from tqdm.auto import tqdm
 
 
 class EarlyStopping:
