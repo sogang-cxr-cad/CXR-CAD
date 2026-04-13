@@ -51,7 +51,7 @@ train:
   epochs: 20
   lr: 1.0e-4
   weight_decay: 1.0e-5
-  focal_gamma: 2.0 # Focal Loss γ. 실험: 0/1/2/3
+  focal_gamma: 0.0 # Focal Loss γ. 실험: 0/1/2/3 (최적값 0.0)
   early_stopping_patience: 7
   use_amp: true # Mixed Precision (torch.amp.autocast)
   grad_clip: 1.0 # gradient clipping max_norm
