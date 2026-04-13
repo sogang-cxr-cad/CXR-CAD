@@ -32,16 +32,16 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
 ## 1. 📊 Data 팀
 **목표:** 딥러닝 학습에 필요한 안정적인 전처리 파이프라인 및 데이터셋 환경 구축.
 
-- [ ] **`src/preprocess/split.py` 점검**
+- [x] **`src/preprocess/split.py` 점검**
   - GroupKFold를 활용한 **환자 단위(Patient-level) 분할** 로직 검증.
   - 학습(Train), 검증(Val), 테스트(Test) 세트 간 데이터 누수(Data Leakage) 완벽 차단.
-- [ ] **`src/preprocess/data_loader.py` 점검**
+- [x] **`src/preprocess/data_loader.py` 점검**
   - PyTorch Dataset/DataLoader 구성 및 Transform(Augmentation) 파이프라인 확인.
   - CLAHE(대조도 보정) 로직 정상 동작 여부.
-- [ ] **Kaggle 데이터 준비 (`KAGGLE_SETUP.md` 필독)**
+- [x] **Kaggle 데이터 준비 (`KAGGLE_SETUP.md` 필독)**
   - NIH ChestX-ray14 크기 축소 버전(224x224) 및 CheXpert 데이터 Kaggle 연동 환경 구성.
   - CheXpert Uncertain(-1) 레이블의 `u_zeros` 처리 로직 점검.
-- [ ] **데이터 탐색 및 전처리 검증 (Phase 1. 데이터 탐색 및 튜닝)**
+- [x] **데이터 탐색 및 전처리 검증 (Phase 1. 데이터 탐색 및 튜닝)**
   - 캐글 환경 구축 후, 제일 먼저 `notebooks/01_EDA.ipynb`를 실행하여 데이터셋의 질환 분포 및 Data Leakage를 검토합니다.
   - `notebooks/02_CLAHE_Analysis.ipynb`를 통하여 X-ray 영상 대조도 개선(CLAHE) 파라미터 튜닝 후 결과물을 AI팀에 공유합니다.
 
@@ -50,10 +50,10 @@ print(f"Dataset Path: {NIH_DIR}, Batch Size: {BATCH_SIZE}, Gamma: {FOCAL_GAMMA}"
 ## 2. 🧠 AI 팀
 **목표:** 모델 아키텍처 확정, 5-Fold 학습 루프 실행 및 최종 가중치 추출.
 
-- [ ] **`src/train/models.py` & `src/train/focal_loss.py` 점검**
+- [x] **`src/train/models.py` & `src/train/focal_loss.py` 점검**
   - DenseNet, EfficientNet, ViT 클래스가 `logits` 형태로 값을 제대로 출력하는지 점검. (Sigmoid 제거 확인).
   - 클래스 불균형 해결을 위한 Focal Loss 파라미터(`pos_weight`, `gamma`) 확인.
-- [ ] **Kaggle GPU 학습 환경 구성 (`KAGGLE_SETUP.md` 필독)**
+- [x] **Kaggle GPU 학습 환경 구성 (`KAGGLE_SETUP.md` 필독)**
   - 제공된 `notebooks/04_Training.ipynb` 또는 작성할 `trainer.py`를 활용하여 Kaggle 환경에서 P100 x 2 (or T4 x 2) 등 GPU 세팅 및 리소스 최적화.
 - [ ] **본격적인 학습 진행 (Phase 2. 메인 모델 학습)**
   - Kaggle의 가속기(T4 x 2)를 활용해 `notebooks/04_Training.ipynb` 파이프라인을 구동, 5-Fold 학습을 돌리고 최고 성능 모델을 선정합니다.
