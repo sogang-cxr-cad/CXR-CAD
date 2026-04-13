@@ -70,7 +70,7 @@ class DenseNet121CAD(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feat = torch.relu(self.features(x), inplace=True)
+        feat = self.features(x).relu_()
         feat = self.avgpool(feat)
         feat = torch.flatten(feat, 1)
         return self.classifier(feat)  # logits — sigmoid는 추론 시 별도 적용
