@@ -147,27 +147,24 @@ class ViTCAD(nn.Module):
 
 # ── 팩토리 함수 ───────────────────────────────────────────────────────────────
 
-def build_model(model_name: str, num_classes: int = NUM_CLASSES) -> nn.Module:
+def build_model(
+    model_name: str, num_classes: int = NUM_CLASSES, pretrained: bool = False
+) -> nn.Module:
     """
-    모델 이름으로 CAD 모델 인스턴스 생성 (가중치 미로드 상태).
+    모델 이름으로 CAD 모델 인스턴스 생성.
 
     Args:
         model_name: "densenet" | "efficientnet" | "vit"
         num_classes: 출력 클래스 수 (기본 14)
-
-    Returns:
-        eval 모드 CAD 모델 (가중치 미로드)
-
-    Raises:
-        ValueError: 지원하지 않는 모델 이름
+        pretrained: ImageNet 사전학습 가중치 사용 여부
     """
     name = model_name.lower().strip()
     if name == "densenet":
-        return DenseNet121CAD(num_classes=num_classes)
+        return DenseNet121CAD(num_classes=num_classes, pretrained=pretrained)
     elif name in ("efficientnet", "efficientnet-b4"):
-        return EfficientNetCAD(num_classes=num_classes)
+        return EfficientNetCAD(num_classes=num_classes, pretrained=pretrained)
     elif name in ("vit", "vit-b/16", "vit_b_16"):
-        return ViTCAD(num_classes=num_classes)
+        return ViTCAD(num_classes=num_classes, pretrained=pretrained)
     raise ValueError(
         f"지원하지 않는 모델: '{model_name}'. 지원 목록: {SUPPORTED_MODELS}"
     )
