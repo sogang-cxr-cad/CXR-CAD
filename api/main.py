@@ -359,12 +359,43 @@ async def predict(
     top_disease = max(probs, key=probs.get)
     model_name  = get_model_info().get(model_key, {}).get("display_name", model_key)
 
+    gradcam_b64 = _FAKE_GRADCAM_B64
+    if not is_placeholder:
+        try:
+            import numpy as np
+            import cv2
+            from src.analysis.gradcam import GradCAM, get_target_layer, apply_heatmap_overlay, cam_to_base64
+            
+            grad_model_key = model_key
+            if model_key == "ensemble":
+                loaded_keys = [k for k, v in _model_registry.items() if v is not None]
+                if loaded_keys:
+                    grad_model_key = loaded_keys[0]
+            
+            target_model = _model_registry.get(grad_model_key)
+            if target_model is not None:
+                class_idx = DISEASE_LABELS.index(top_disease)
+                tensor = preprocess_single_image(image).to(DEVICE)
+                
+                target_layer = get_target_layer(target_model)
+                gcam = GradCAM(target_model, target_layer)
+                cam = gcam.generate(tensor, class_idx, image_size=(image.height, image.width))
+                gcam.remove_hooks()
+                
+                orig_img = np.array(image.convert("RGB"))
+                if orig_img.shape[:2] != (image.height, image.width):
+                    orig_img = cv2.resize(orig_img, (image.width, image.height))
+                overlay = apply_heatmap_overlay(orig_img, cam)
+                gradcam_b64 = cam_to_base64(overlay)
+        except Exception as e:
+            print(f"Grad-CAM error: {e}")
+
     return PredictionResult(
         **probs,
         Detected_Diseases  = detected,
         Top_Disease        = top_disease,
         Top_Probability    = round(probs[top_disease], 4),
-        GradCAM_Base64     = _FAKE_GRADCAM_B64,
+        GradCAM_Base64     = gradcam_b64,
         Inference_Time_ms  = inference_ms,
         Model_Used         = model_name,
         Model_Key          = model_key,

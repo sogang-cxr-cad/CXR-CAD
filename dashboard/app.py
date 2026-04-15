@@ -347,24 +347,53 @@ else:
     image_bytes = uploaded_file.getvalue()
     image       = Image.open(io.BytesIO(image_bytes))
 
+    # API 호출을 컬럼 렌더링 전에 수행하여 col_left에서도 result(특히 Grad-CAM)를 쓸 수 있게 함
+    result = None
+    if health:
+        model_label = MODEL_OPTIONS[selected_model_key]["label"]
+        with st.spinner(f"🔄 {model_label}로 분석 중..."):
+            result = call_predict_api(image_bytes, uploaded_file.name, selected_model_key, threshold)
+
     col_left, col_right = st.columns([2, 3], gap="large")
 
     # ── 좌측: 이미지 ─────────────────────────────────────────────────────────
     with col_left:
         st.markdown('<div class="section-title">📷 업로드된 이미지</div>', unsafe_allow_html=True)
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+        st.markdown('<div class="premium-card" style="padding:1.5rem; text-align:center;">', unsafe_allow_html=True)
         st.image(image, width="stretch", caption=uploaded_file.name)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-title">🎯 Grad-CAM 시각화</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="premium-card" style="text-align:center;padding:2rem;">
-            <div style="font-size:2rem;opacity:0.3;">🔬</div>
-            <p style="color:#94a3b8;font-size:0.85rem;margin:0.5rem 0 0;">
-                Grad-CAM 시각화는 모델 학습 완료 후 표시됩니다.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+
+        # 실제 모델이 Grad-CAM을 반환했으면(길이가 충분히 길다면) 표시
+        is_placeholder_cam = True
+        if result and "GradCAM_Base64" in result and len(result["GradCAM_Base64"]) > 500:
+            is_placeholder_cam = False
+
+        if not is_placeholder_cam:
+            import base64
+            cam_bytes = base64.b64decode(result["GradCAM_Base64"])
+            st.markdown('<div class="premium-card" style="padding:1.2rem; text-align:center;">', unsafe_allow_html=True)
+            st.image(cam_bytes, width="stretch")
+            st.markdown("""
+            <div style="margin-top:1.2rem; padding:1rem; border-radius:12px; background:linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border:1px solid #bfdbfe; color:#1e40af; font-size:0.9rem; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                <b>💡 활성화 맵(Heatmap) 해석 방법</b><br>
+                <span style="color:#ef4444;font-weight:600;">붉은색(Red)</span> 영역은 AI가 해당 질환을 판단할 때 <b>가장 강력하게 주목한 병변 의심 부위</b>를 나타냅니다.
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="premium-card" style="text-align:center;padding:3rem 2rem;">
+                <div style="font-size:2.5rem;opacity:0.3;margin-bottom:1rem;">🔬</div>
+                <p style="color:#475569;font-weight:600;margin:0;">히트맵이 아직 준비되지 않았습니다</p>
+                <p style="color:#94a3b8;font-size:0.85rem;margin:0.5rem 0 0;">
+                    실제 학습 가중치가 적용된 모델 모드에서만 활성화 맵 렌더링이 지원됩니다.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+
 
     # ── 우측: 분석 결과 ──────────────────────────────────────────────────────
     with col_right:
@@ -373,57 +402,51 @@ else:
         if not health:
             st.error("⚠️ 백엔드 API가 연결되지 않았습니다. 서버를 먼저 실행하세요.")
             st.code("uvicorn api.main:app --reload --port 8000", language="bash")
-        else:
-            model_label = MODEL_OPTIONS[selected_model_key]["label"]
-            with st.spinner(f"🔄 {model_label}로 분석 중..."):
-                result = call_predict_api(image_bytes, uploaded_file.name, selected_model_key, threshold)
+        elif result is not None:
+            # ── 사용 모델 표시 ────────────────────────────────────────────
+            model_used = result.get("Model_Used", selected_model_key)
+            is_placeholder = not health.get("model_loaded", False)
+            mode_tag = "⚠️ Placeholder 모드" if is_placeholder else f"✅ {model_used}"
+            st.info(f"**분석 모델**: {mode_tag}", icon="🤖")
 
-            if result:
-                # ── 사용 모델 표시 ────────────────────────────────────────────
-                model_used = result.get("Model_Used", selected_model_key)
-                is_placeholder = not health.get("model_loaded", False)
-                mode_tag = "⚠️ Placeholder 모드" if is_placeholder else f"✅ {model_used}"
-                st.info(f"**분석 모델**: {mode_tag}", icon="🤖")
+            # ── Top Disease 카드 ──────────────────────────────────────────
+            top_disease = result["Top_Disease"].replace("_", " ")
+            top_prob    = result.get("Top_Probability", result.get(result["Top_Disease"], 0.0))
+            st.markdown(f"""
+            <div class="top-disease-card">
+                <div class="sub">PRIMARY FINDING</div>
+                <h2>{top_disease}</h2>
+                <div class="prob">{top_prob:.1%}</div>
+                <div class="sub">CONFIDENCE SCORE</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                # ── Top Disease 카드 ──────────────────────────────────────────
-                top_disease = result["Top_Disease"].replace("_", " ")
-                top_prob    = result.get("Top_Probability",
-                              result.get(result["Top_Disease"], 0.0))  # 하위 호환
-                st.markdown(f"""
-                <div class="top-disease-card">
-                    <div class="sub">PRIMARY FINDING</div>
-                    <h2>{top_disease}</h2>
-                    <div class="prob">{top_prob:.1%}</div>
-                    <div class="sub">CONFIDENCE SCORE</div>
-                </div>
-                """, unsafe_allow_html=True)
+            # ── 지표 행 ──────────────────────────────────────────────────
+            m1, m2, m3 = st.columns(3)
+            detected_count = len(result["Detected_Diseases"])
+            with m1:
+                st.markdown(f"""<div class="inference-metric"><div class="value">{result['Inference_Time_ms']}ms</div><div class="label">추론 시간</div></div>""", unsafe_allow_html=True)
+            with m2:
+                st.markdown(f"""<div class="inference-metric"><div class="value">{detected_count}</div><div class="label">감지된 질환</div></div>""", unsafe_allow_html=True)
+            with m3:
+                st.markdown(f"""<div class="inference-metric"><div class="value">14</div><div class="label">검사 질환</div></div>""", unsafe_allow_html=True)
 
-                # ── 지표 행 ──────────────────────────────────────────────────
-                m1, m2, m3 = st.columns(3)
-                detected_count = len(result["Detected_Diseases"])
-                with m1:
-                    st.markdown(f"""<div class="inference-metric"><div class="value">{result['Inference_Time_ms']}ms</div><div class="label">추론 시간</div></div>""", unsafe_allow_html=True)
-                with m2:
-                    st.markdown(f"""<div class="inference-metric"><div class="value">{detected_count}</div><div class="label">감지된 질환</div></div>""", unsafe_allow_html=True)
-                with m3:
-                    st.markdown(f"""<div class="inference-metric"><div class="value">14</div><div class="label">검사 질환</div></div>""", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
-                st.markdown("<br>", unsafe_allow_html=True)
+            # ── 감지된 질환 태그 ──────────────────────────────────────────
+            st.markdown('<div class="section-title">🚨 감지된 질환</div>', unsafe_allow_html=True)
+            detected = [d for d in DISEASE_LABELS if result.get(d, 0) >= threshold]
+            if detected:
+                tags_html = " ".join(
+                    f'<span class="disease-tag">{d.replace("_"," ")} ({result[d]:.0%})</span>'
+                    for d in detected
+                )
+                st.markdown(f'<div class="premium-card">{tags_html}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown("""<div class="premium-card" style="text-align:center;color:#10b981;">✅ 임계값 이상의 유의미한 질환이 감지되지 않았습니다.</div>""", unsafe_allow_html=True)
 
-                # ── 감지된 질환 태그 ──────────────────────────────────────────
-                st.markdown('<div class="section-title">🚨 감지된 질환</div>', unsafe_allow_html=True)
-                detected = [d for d in DISEASE_LABELS if result.get(d, 0) >= threshold]
-                if detected:
-                    tags_html = " ".join(
-                        f'<span class="disease-tag">{d.replace("_"," ")} ({result[d]:.0%})</span>'
-                        for d in detected
-                    )
-                    st.markdown(f'<div class="premium-card">{tags_html}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown("""<div class="premium-card" style="text-align:center;color:#10b981;">✅ 임계값 이상의 유의미한 질환이 감지되지 않았습니다.</div>""", unsafe_allow_html=True)
-
-                # ── 질환 확률 차트 ────────────────────────────────────────────
-                st.markdown('<div class="section-title">📈 전체 질환 확률</div>', unsafe_allow_html=True)
-                probs = {label: result[label] for label in DISEASE_LABELS}
-                fig = create_disease_chart(probs, threshold)
-                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+            # ── 질환 확률 차트 ────────────────────────────────────────────
+            st.markdown('<div class="section-title">📈 전체 질환 확률</div>', unsafe_allow_html=True)
+            probs = {label: result[label] for label in DISEASE_LABELS}
+            fig = create_disease_chart(probs, threshold)
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})

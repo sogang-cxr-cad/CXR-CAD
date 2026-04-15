@@ -117,104 +117,58 @@ CHECKPOINT_DIR = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
 DEFAULT_LLM_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 
-# ── 예시 데이터 (README 기반) ──────────────────────────────────────────────────
-EXAMPLE_OP = pd.DataFrame(
-    {
-        "기준": ["Youden's J", "Sensitivity 90%", "Specificity 90%"],
-        "Threshold": [0.42, 0.28, 0.56],
-        "Sensitivity": [0.823, 0.900, 0.689],
-        "Specificity": [0.845, 0.712, 0.900],
-        "PPV": [0.134, 0.081, 0.165],
-        "NPV": [0.992, 0.996, 0.988],
-    }
+# ── 데이터 로드 함수 ────────────────────────────────────────────────────────
+def load_csv_data(filename: str, fallback_cols: list) -> pd.DataFrame:
+    path = CHECKPOINT_DIR / filename
+    if path.exists():
+        try:
+            return pd.read_csv(path)
+        except Exception as e:
+            st.error(f"Failed to read {filename}: {e}")
+    return pd.DataFrame(columns=fallback_cols)
+
+# 체크포인트 디렉토리에서 실제 평가 결과물들을 스캔하여 로드
+EXAMPLE_OP = load_csv_data(
+    "op_analysis.csv", 
+    ["기준", "Threshold", "Sensitivity", "Specificity", "PPV", "NPV"]
 )
 
-EXAMPLE_GENDER = pd.DataFrame(
-    {
-        "Disease": ["Cardiomegaly", "Effusion", "Hernia", "Mean"],
-        "Male AUROC": [0.9123, 0.8634, 0.9012, 0.8245],
-        "Female AUROC": [0.8834, 0.8823, 0.9234, 0.8287],
-        "Gap": ["+2.9%", "-1.9%", "-2.2%", "-0.4%"],
-    }
+EXAMPLE_GENDER = load_csv_data(
+    "gender_subgroup.csv", 
+    ["Disease", "Male AUROC", "Female AUROC", "Gap"]
 )
 
-EXAMPLE_AGE = pd.DataFrame(
-    {
-        "Age Group": ["0-40", "40-60", "60+"],
-        "N": [23456, 48234, 40430],
-        "Mean AUROC": [0.8123, 0.8312, 0.8089],
-    }
+# 아직 노트북 구현이 없는 부분이나 나이에 대한 처리는 빈 DF가 리턴됩니다.
+EXAMPLE_AGE = load_csv_data(
+    "age_subgroup.csv", 
+    ["Age Group", "N", "Mean AUROC"]
 )
 
-EXAMPLE_VIEW = pd.DataFrame(
-    {
-        "View": ["PA", "AP"],
-        "N": [67234, 44886],
-        "Mean AUROC": [0.8345, 0.7823],
-        "Gap vs PA": ["—", "-5.2%"],
-    }
+EXAMPLE_VIEW = load_csv_data(
+    "view_subgroup.csv", 
+    ["View", "N", "Mean AUROC", "Gap vs PA"]
 )
 
-EXAMPLE_EXT = pd.DataFrame(
-    {
-        "Disease": ["Cardiomegaly", "Effusion", "Pneumonia", "Atelectasis", "Mean"],
-        "NIH AUROC": [0.9012, 0.8745, 0.7534, 0.7934, 0.8306],
-        "CheXpert AUROC": [0.8534, 0.8234, 0.6823, 0.7423, 0.7754],
-        "Gap": ["-4.8%", "-5.1%", "-7.1%", "-5.1%", "-5.5%"],
-    }
+# 08 노트북의 결과
+EXAMPLE_EXT = load_csv_data(
+    "densenet_domain_shift.csv", # 기본 덴스넷 기준
+    ["Disease", "NIH AUROC", "CheXpert AUROC", "Gap"]
 )
 
-FALSE_POSITIVE_DF = pd.DataFrame(
-    {
-        "Case": ["FP-1", "FP-2", "FP-3", "FP-4", "FP-5"],
-        "예측": ["Pneumothorax", "Cardiomegaly", "Effusion", "Nodule", "Mass"],
-        "GT": ["Normal"] * 5,
-        "확률": [0.78, 0.65, 0.72, 0.58, 0.61],
-        "Grad-CAM": [
-            "우측 쇄골 아래 강조",
-            "심장 전체 강조",
-            "좌측 하단 강조",
-            "우측 상단 점",
-            "좌측 중간 강조",
-        ],
-        "원인": [
-            "쇄골 경계→기흉 오인",
-            "비만 정상 큰 심장",
-            "유방 그림자→흉수 오인",
-            "혈관 단면→결절 오인",
-            "촬영 아티팩트",
-        ],
-    }
+FALSE_POSITIVE_DF = load_csv_data(
+    "false_positive.csv", 
+    ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]
 )
 
-FALSE_NEGATIVE_DF = pd.DataFrame(
-    {
-        "Case": ["FN-1", "FN-2", "FN-3", "FN-4", "FN-5"],
-        "예측": ["Normal"] * 5,
-        "GT": ["Nodule", "Pneumonia", "Effusion", "Atelectasis", "Hernia"],
-        "확률": [0.12, 0.23, 0.18, 0.21, 0.08],
-        "Grad-CAM": [
-            "심장 영역 집중",
-            "분산된 활성화",
-            "폐 상부 집중",
-            "좌측 폐 무시",
-            "폐 영역만 집중",
-        ],
-        "원인": [
-            "작은 결절(5mm) 미탐지",
-            "미만성 병변 인식 실패",
-            "소량 흉수 미탐지",
-            "우측 폐에만 집중",
-            "횡격막 영역 무시",
-        ],
-    }
+FALSE_NEGATIVE_DF = load_csv_data(
+    "false_negative.csv", 
+    ["Case", "예측", "GT", "확률", "Grad-CAM", "원인"]
 )
 
-REGION_DF = pd.DataFrame(
-    {
-        "영역": ["폐 영역 내", "뼈(쇄골/늑골)", "의료기기", "텍스트/마커", "배경"],
-        "Count": [72, 12, 8, 5, 3],
-    }
+# 아직 에러 분석에서 추출하지 않는 영역
+REGION_DF = load_csv_data(
+    "shortcut_regions.csv", 
+    ["영역", "Count"]
 )
 
 
