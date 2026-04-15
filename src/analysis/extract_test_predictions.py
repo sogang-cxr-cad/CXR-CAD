@@ -10,13 +10,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.train.models import build_model, DISEASE_LABELS
-from src.preprocess.nih_loader import build_data_loaders
+from src.preprocess.data_loader import build_dataloaders, load_nih_csv, create_dataloader
+from src.preprocess.transforms import get_inference_transforms
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # 1. 모델 레이블 로드
+    # 1. 모델 로드
     model_key = args.model
     model = build_model(model_key)
     ckpt_path = os.path.join(args.checkpoint_dir, f"{model_key}_best.pth")
@@ -28,34 +29,40 @@ def main(args):
     model.to(device)
     model.eval()
 
-    # 2. 메타데이터 및 Test DataLoader 준비
-    # 실제 환경의 batch size 조정
-    _, _, test_loader = build_data_loaders(
-        data_dir=args.data_dir,
+    # 2. 데이터셋 및 DataLoader 준비
+    # data_loader.py의 build_dataloaders를 사용하되 메타데이터가 필요하므로 직접 구성
+    print("Loading NIH metadata...")
+    df = load_nih_csv(args.data_dir)
+    # 기존 split 로직(Patient ID 기준)을 그대로 따름
+    from src.preprocess.data_loader import split_by_patient
+    _, test_df = split_by_patient(df, test_ratio=0.15)
+    
+    test_loader = create_dataloader(
+        df=test_df,
+        images_dir=os.path.join(args.data_dir, "images"),
+        transform=get_inference_transforms(224), # 기본 사이즈
         batch_size=args.batch_size,
-        num_workers=args.num_workers
+        num_workers=args.num_workers,
+        shuffle=False,
+        return_meta=True  # 이미지 이름(Index)을 가져오기 위해 필수
     )
     
-    # 3. CSV 매핑을 위한 파일 오픈
-    meta_path = os.path.join(args.data_dir, "Data_Entry_2017.csv")
-    meta_df = pd.read_csv(meta_path)
-    
-    # Image Index 별 통계를 빠르게 가져오기 위한 딕셔너리화
-    meta_dict = meta_df.set_index("Image Index").to_dict("index")
+    # 3. 메타데이터 매핑용 딕셔너리 (Patient Info)
+    meta_dict = test_df.set_index("Image Index").to_dict("index")
 
     results = []
 
     # 4. 추론 루프
-    print(f"Evaluating {model_key} on the test set...")
+    print(f"Evaluating {model_key} on the test set ({len(test_df)} images)...")
     with torch.no_grad():
-        for images, labels, image_names in tqdm(test_loader, desc="Inference"):
+        for images, labels, meta in tqdm(test_loader, desc="Inference"):
             images = images.to(device)
             # 예측 로직 (Logits -> Sigmoid)
             logits = model(images)
             probs = torch.sigmoid(logits).cpu().numpy()
             labels = labels.cpu().numpy()
             
-            # DataFrame Rows 구성
+            image_names = meta["image_index"]
             for i in range(len(image_names)):
                 img_name = image_names[i]
                 prob = probs[i]
