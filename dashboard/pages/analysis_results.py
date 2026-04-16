@@ -719,7 +719,8 @@ with st.sidebar:
     st.markdown("*지표별 분석 화면*")
     st.divider()
 
-    has_real = any((CHECKPOINT_DIR / f).exists() for f in ["densenet_test_results.csv", "class_distribution.png"])
+    # 실제 결과 데이터 인지 조건 수정 (test_predictions.csv 혹은 op_analysis.csv가 있으면 실제 데이터로 간주)
+    has_real = any((CHECKPOINT_DIR / f).exists() for f in ["test_predictions.csv", "op_analysis.csv"])
     if has_real:
         st.success("✅ 실제 결과 데이터 감지됨")
     else:

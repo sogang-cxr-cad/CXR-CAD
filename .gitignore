@@ -93,3 +93,4 @@ notebooks/.ipynb_checkpoints/
 !checkpoints/false_*.csv
 !checkpoints/*.png
 !checkpoints/test_predictions.csv
+!checkpoints/shortcut_regions.csv
