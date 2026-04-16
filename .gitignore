@@ -85,3 +85,11 @@ data/
 # Jupyter Notebook 체크포인트
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
+
+# 아래 요약 파일들은 예외적으로 허용
+!checkpoints/op_analysis.csv
+!checkpoints/*_subgroup.csv
+!checkpoints/*_domain_shift.csv
+!checkpoints/false_*.csv
+!checkpoints/*.png
+!checkpoints/test_predictions.csv
